@@ -22,7 +22,7 @@
 
 ## 包名
 
-`com.xihanfun:xihan-kernel`（Maven Central）。领域词与规范术语表（`conventions/vocabulary.md`）一致，只换本语言的大小写风格。
+`com.xihanfun:xihan-framework`（Maven Central）；多模块的 artifactId 用 `xihan-framework-<包>`。领域词与规范术语表（`conventions/vocabulary.md`）一致，只换本语言的大小写风格。
 
 ## 成熟度
 
