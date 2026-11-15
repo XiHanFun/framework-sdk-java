@@ -45,9 +45,18 @@ OperationResponse response = invoker.invoke(context, OperationRequest.of("orders
 // response.payloadText() == Optional[{"id":"o-c1","quantity":2}]
 ```
 
-- 可恢复失败返回 `Result` / `Error`，不抛异常。错误码按 `<领域大写>_<KIND>_<NNN>`，文案用消息键 + 语言文件（RFC-0010），`Error.message()` 在没有已解析文案时按 `MessageScope` 的进程默认目录解析，再退回 `键 (参数)` 的描述。
+- 可恢复失败返回 `Result` / `Error`，不抛异常。错误码按 `<领域大写>_<KIND>_<NNN>`，文案用消息键 + 语言文件（RFC-0010），`Error.message()` 在没有已解析文案时按 `MessageScope` 的进程默认目录解析，翻译不出时用 SDK 自带的内核消息英文模板（`KernelMessages`，与 `kernel-messages.json` 逐字相同），再退回 `键 (参数)` 的描述。
 - 配置错误（清单不合法、管道成环、操作重复登记、登记表已满）抛出带错误码的 `FrameworkException`；参数格式不合法这类调用方的编程错误抛 `IllegalArgumentException`，状态不允许抛 `IllegalStateException`。消息是英文句子，标识符加单引号。
-- `Result<T>`、`Error`、`Maybe<T>`、`TypedId` 的 JSON 编码与 .NET 参考实现和 Go SDK 一致（`{"ok":true,"value":…}` / `{"ok":false,"error":{…}}`）：`new ObjectMapper().registerModule(new PrimitivesModule())`。生命周期迁移表、管道阶段顺序、错误码、Baggage 键与能力依赖文法由 `spec/conformance/vectors` 验证；清单的规范化输出与 Go SDK 逐字节相同。
+- `Result<T>`、`Error`、`Maybe<T>`、`TypedId` 的 JSON 编码按 RFC-0001「Result」：`new ObjectMapper().registerModule(new PrimitivesModule())`。生命周期迁移表、管道阶段顺序、错误码、Baggage 键与值、能力依赖文法、线上编码、消息模板与内核错误都由 `spec/conformance/vectors` 验证；清单的规范化输出与 Go SDK 逐字节相同。
+
+### 按规范 ADR-0233 统一的行为（各语言 SDK 相同）
+
+- **线上编码**：无值成功（`Result<Unit>`）只写 `{"ok":true}`，以前写 `{"ok":true,"value":{}}`；读取时带了 `value` 即拒绝，`{}` 与 `null` 也一样。`Result<Maybe<T>>` 的无值是 `"value":null`。`Error` 的 `message` 必填且非空；`messageKey`、`details`、`inner` 缺失表示没有，写成 `null` 不合法；Result 与 Error 的未知成员忽略。
+- **模板**：消息键最长 128 个字符。可移植的格式说明符是 `D` / `Dn`、`X` / `x`、`F` / `Fn`、`N` / `Nn`，按不变文化；`F` 与 `N` 按值的精确十进制展开舍入、正好一半取偶（0.125 写 `F2` 得 `0.12`，2.5 写 `F0` 得 `2`，2.675 写 `F2` 得 `2.67`）。其余说明符按无格式输出：以前支持的 printf 写法（`{n:%03d}`）不再解释，改用 `{n:D3}`。值的文本形式：布尔 `true` / `false`，`null` 为空串，浮点在 [1e-4, 1e15) 内写最短往返形式、不用指数，整数值的浮点不带小数点。
+- **内核错误**：操作与调用上下文产生的错误码、消息键与参数照 `kernel-messages.json`；调用开始前截止时间已过的上下文报 `kernel.invocation.deadline_before_start`。配置期的重复登记与登记表已满仍抛 `FrameworkException`，它带着 `kernel.operation.duplicate`（`id`、`owner`）与 `kernel.operation.registry_full`（`capacity`）的错误，`toError()` 原样交出。
+- **Baggage 值**：已登记键的值要非空、按 UTF-16 码元计最多 256、不含 U+0000–U+001F 与 U+007F–U+009F；`Context.builder()…build()` 与 `withBaggage` 遇到不合的值丢弃这个成员（派生时原来的值也不保留），`xihan.idempotency-key` 除外。
+- **追踪**：上游的 trace-flags 整字节保留、原样写出，是否采样只看最低位；没有上游时 `traceParent()` 写 `01`。
+- **清单**：`contributes.operations` 的每一项按操作 ID 文法校验（如 `orders-.create` 不合法）。
 - 注意 `com.xihanfun.framework.primitives.Error` 与 `java.lang.Error` 同名：在用到它的文件里显式导入；它不是 `Throwable`，误用在编译期就报错。
 
 ## 设计取舍
