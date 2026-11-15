@@ -38,6 +38,7 @@
     <module>manifest</module>
     <module>invocation</module>
     <module>pipeline</module>
+    <module>operation</module>
   </modules>
 
   <properties>
