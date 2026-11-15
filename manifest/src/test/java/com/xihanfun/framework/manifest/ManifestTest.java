@@ -156,6 +156,18 @@ class ManifestTest {
     }
 
     @Test
+    void contributedOperationsFollowTheOperationIdGrammar() {
+        // RFC-0002 解析规则 2（ADR-0233）：contributes.operations 的每一项符合操作 ID 文法，比 Schema 以前的写法严格
+        String template = "{\"id\":\"xihan.a.b\",\"version\":\"1.0.0\",\"primitives\":\"1\",\"stability\":\"stable\",\"kind\":\"capability\",\"contributes\":{\"operations\":[\"%s\"]}}";
+        for (String id : List.of("orders.create", "order-lines.list", "items-1.list", "a1.b2")) {
+            assertDoesNotThrow(() -> ManifestJson.read(template.formatted(id)), id);
+        }
+        for (String id : List.of("orders-.create", "orders.create-", "order--lines.list", "orders.-create", "-orders.create", "orders", "1orders.create", "orders.Create")) {
+            assertRejected(template.formatted(id), id);
+        }
+    }
+
+    @Test
     void requirementsFollowTheVectors() throws IOException {
         JsonNode vectors = Vectors.read("primitives/capability-requirements.json");
         for (JsonNode valid : vectors.get("valid")) {

@@ -14,8 +14,11 @@ import java.util.regex.Pattern;
  * 插件的由宿主在登记它的代理操作时一并登记（{@code plugin/invocation.md} §1）。
  */
 public final class Contributions {
-    /** 清单里的操作 ID 文法（Schema 的写法）。 */
-    private static final Pattern OPERATION = Pattern.compile("^[a-z][a-z0-9-]*\\.[a-z][a-z0-9-]*$");
+    /**
+     * 操作 ID 文法（RFC-0011、conventions/operation-ids.md）：资源与动词都是小写字母开头、连字符分隔；
+     * 与 operation 模块的 OperationId 相同（manifest 不依赖 operation，所以在这里另写一份）。
+     */
+    private static final Pattern OPERATION = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$");
 
     /** 权限码文法（RFC-0008）。 */
     private static final Pattern PERMISSION_CODE = Pattern.compile("^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$");
