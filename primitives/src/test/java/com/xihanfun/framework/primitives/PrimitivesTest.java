@@ -55,7 +55,13 @@ class PrimitivesTest {
         assertEquals(registered, BaggageKeys.registered());
         registered.forEach(key -> assertTrue(BaggageKeys.isRegistered(key), key));
         assertFalse(BaggageKeys.isRegistered("xihan.feature-flag"));
-        // ADR-0204：值非空、不超过 256 个字符、不含控制字符
+        // ADR-0204、ADR-0233：值非空、按 UTF-16 码元计不超过 256、不含 U+0000–U+001F 与 U+007F–U+009F
+        for (String value : Vectors.strings(vectors.get("values").get("acceptable"))) {
+            assertTrue(BaggageKeys.isAcceptableValue(value), value + " must be acceptable");
+        }
+        for (String value : Vectors.strings(vectors.get("values").get("unacceptable"))) {
+            assertFalse(BaggageKeys.isAcceptableValue(value), value + " must be unacceptable");
+        }
         assertTrue(BaggageKeys.isAcceptableValue("t1"));
         assertTrue(BaggageKeys.isAcceptableValue("x".repeat(BaggageKeys.MAX_VALUE_LENGTH)));
         assertFalse(BaggageKeys.isAcceptableValue("x".repeat(BaggageKeys.MAX_VALUE_LENGTH + 1)));

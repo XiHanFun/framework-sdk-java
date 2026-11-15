@@ -104,6 +104,23 @@ class ContextTest {
     }
 
     @Test
+    void unacceptableBaggageValuesAreDropped() throws Exception {
+        var values = Vectors.read("primitives/baggage-keys.json").get("values");
+        for (String value : Vectors.strings(values.get("acceptable"))) {
+            assertEquals(Optional.of(value), Context.builder().baggage(BaggageKeys.TENANT, value).build().tenant(), value);
+            assertEquals(Optional.of(value), Context.background().withBaggage(BaggageKeys.CORRELATION, value).correlation(), value);
+        }
+        Context tenanted = Context.builder().baggage(BaggageKeys.TENANT, "t1").build();
+        for (String value : Vectors.strings(values.get("unacceptable"))) {
+            assertEquals(Optional.empty(), Context.builder().baggage(BaggageKeys.TENANT, value).build().tenant(), "built: " + value);
+            assertEquals(Optional.empty(), tenanted.withBaggage(BaggageKeys.TENANT, value).tenant(), "derived, and the old value is not kept: " + value);
+            // 幂等键不按这条丢弃；未登记的进程内键不受约束
+            assertEquals(Optional.of(value), Context.builder().baggage(BaggageKeys.IDEMPOTENCY_KEY, value).build().idempotencyKey(), value);
+            assertEquals(Optional.of(value), Context.background().withBaggage("xihan.feature-flag", value).findBaggage("xihan.feature-flag"));
+        }
+    }
+
+    @Test
     void theDeadlineTokenWinsOnceItFires() throws InterruptedException {
         // RFC-0004：归因只看令牌；调用方先取消时报取消，截止令牌随后触发即改报超时，不论调用方是否也已取消
         CancellableContext scope = Context.background().withTimeout(Duration.ofMillis(50));
