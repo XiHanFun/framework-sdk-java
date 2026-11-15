@@ -89,6 +89,16 @@ class ContextTest {
         Context traced = Context.builder().trace("0af7651916cd43dd8448eb211c80319c", "b7ad6b7169203331").build();
         assertEquals(Optional.of(true), traced.sampled(), "a trace without flags counts as sampled upstream");
         assertTrue(TraceParent.parse("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03").orElseThrow().sampled(), "the sampled bit");
+        // 标志的其余位原样保留、不解释（RFC-0003 规则 7）
+        for (String flags : List.of("03", "02", "ff", "00")) {
+            Context upstream = Context.builder().traceParent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-" + flags).build();
+            assertEquals("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-" + flags, upstream.traceParent(), flags);
+            assertEquals(Optional.of(Integer.parseInt(flags, 16)), upstream.traceFlags());
+            assertEquals(Optional.of((Integer.parseInt(flags, 16) & 1) == 1), upstream.sampled());
+        }
+        assertTrue(Context.background().traceParent().endsWith("-01"), "a root without flags writes 01");
+        assertEquals(Optional.empty(), Context.background().traceFlags());
+        assertThrows(IllegalArgumentException.class, () -> new TraceParent("0af7651916cd43dd8448eb211c80319c", "b7ad6b7169203331", 256));
         assertThrows(IllegalArgumentException.class, () -> Context.builder().trace("xyz", "b7ad6b7169203331"));
     }
 

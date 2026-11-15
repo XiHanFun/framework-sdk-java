@@ -35,8 +35,8 @@ public final class Context {
     private final String traceId;
     private final String spanId;
 
-    /** 上游给出的采样标志；没有上游（这次调用是链路的根）为 {@code null}。 */
-    private final Boolean sampled;
+    /** 上游给出的 trace-flags，整字节保留；没有上游（这次调用是链路的根）为 {@code null}。 */
+    private final Integer traceFlags;
 
     /** 只读的 Baggage。 */
     private final Map<String, String> baggage;
@@ -47,12 +47,12 @@ public final class Context {
     /** 只读的按派生传递的值。 */
     private final Map<ContextKey<?>, Object> values;
 
-    private Context(CancellationState cancellation, String traceId, String spanId, Boolean sampled, Map<String, String> baggage, Items items,
+    private Context(CancellationState cancellation, String traceId, String spanId, Integer traceFlags, Map<String, String> baggage, Items items,
             Map<ContextKey<?>, Object> values) {
         this.cancellation = cancellation;
         this.traceId = traceId;
         this.spanId = spanId;
-        this.sampled = sampled;
+        this.traceFlags = traceFlags;
         this.baggage = baggage;
         this.items = items;
         this.values = values;
@@ -234,21 +234,31 @@ public final class Context {
     }
 
     /**
-     * 返回上游给出的采样标志。
+     * 返回上游给出的 trace-flags。
      *
-     * @return 标志；没有上游、这次调用是链路的根时为空
+     * @return 标志字节；没有上游、这次调用是链路的根时为空
      */
-    public Optional<Boolean> sampled() {
-        return Optional.ofNullable(sampled);
+    public Optional<Integer> traceFlags() {
+        return Optional.ofNullable(traceFlags);
     }
 
     /**
-     * 返回传给下游的 W3C traceparent；没有采样标志时按已采样写出。
+     * 返回上游的采样决定：trace-flags 的最低位。
+     *
+     * @return 是否采样；没有上游、这次调用是链路的根时为空
+     */
+    public Optional<Boolean> sampled() {
+        return traceFlags().map(flags -> (flags & TraceParent.SAMPLED) == TraceParent.SAMPLED);
+    }
+
+    /**
+     * 返回传给下游的 W3C traceparent（RFC-0003 规则 7「写出」）：上游的标志整字节原样写出，{@code 00} 仍是 {@code 00}；
+     * 标志为空（链路的根）时本 SDK 没有采样器，写 {@code 01}，按已采样传下去、由下游的采样器决定。
      *
      * @return traceparent 文本
      */
     public String traceParent() {
-        return new TraceParent(traceId, spanId, sampled == null || sampled).toString();
+        return new TraceParent(traceId, spanId, traceFlags == null ? TraceParent.SAMPLED : traceFlags).toString();
     }
 
     // ---- Baggage ----
@@ -295,7 +305,7 @@ public final class Context {
             copy.remove(key);
         }
         requireBaggageCapacity(copy.size());
-        return new Context(cancellation, traceId, spanId, sampled, Collections.unmodifiableMap(copy), items, values);
+        return new Context(cancellation, traceId, spanId, traceFlags, Collections.unmodifiableMap(copy), items, values);
     }
 
     /**
@@ -310,7 +320,7 @@ public final class Context {
                 copy.put(key, value);
             }
         });
-        return new Context(cancellation, traceId, spanId, sampled, Collections.unmodifiableMap(copy), items, values);
+        return new Context(cancellation, traceId, spanId, traceFlags, Collections.unmodifiableMap(copy), items, values);
     }
 
     /**
@@ -389,7 +399,7 @@ public final class Context {
         if (copy.size() > VALUE_CAPACITY) {
             throw new IllegalStateException("An invocation context cannot carry more than " + VALUE_CAPACITY + " values.");
         }
-        return new Context(cancellation, traceId, spanId, sampled, baggage, items, Collections.unmodifiableMap(copy));
+        return new Context(cancellation, traceId, spanId, traceFlags, baggage, items, Collections.unmodifiableMap(copy));
     }
 
     /**
@@ -418,7 +428,7 @@ public final class Context {
     }
 
     private CancellableContext scope(CancellationState state) {
-        return new CancellableContext(new Context(state, traceId, spanId, sampled, baggage, items, values), state);
+        return new CancellableContext(new Context(state, traceId, spanId, traceFlags, baggage, items, values), state);
     }
 
     /**
@@ -451,7 +461,7 @@ public final class Context {
         private Instant deadline;
         private String traceId;
         private String spanId;
-        private Boolean sampled;
+        private Integer traceFlags;
         private final Map<String, String> baggage = new LinkedHashMap<>();
 
         private Builder() {
@@ -488,10 +498,10 @@ public final class Context {
          * @throws IllegalArgumentException ID 不合格式或全为零
          */
         public Builder trace(String traceIdValue, String spanIdValue) {
-            TraceParent parsed = new TraceParent(traceIdValue, spanIdValue, true);
+            TraceParent parsed = new TraceParent(traceIdValue, spanIdValue, TraceParent.SAMPLED);
             this.traceId = parsed.traceId();
             this.spanId = parsed.spanId();
-            this.sampled = true;
+            this.traceFlags = TraceParent.SAMPLED;
             return this;
         }
 
@@ -505,7 +515,7 @@ public final class Context {
             TraceParent.parse(value).ifPresent(parsed -> {
                 this.traceId = parsed.traceId();
                 this.spanId = parsed.spanId();
-                this.sampled = parsed.sampled();
+                this.traceFlags = parsed.flags();
             });
             return this;
         }
@@ -555,7 +565,7 @@ public final class Context {
                     admitted.put(key, value);
                 }
             });
-            return new Context(CancellationState.root(deadline), trace, span, sampled, Collections.unmodifiableMap(admitted), new Items(), Map.of());
+            return new Context(CancellationState.root(deadline), trace, span, traceFlags, Collections.unmodifiableMap(admitted), new Items(), Map.of());
         }
     }
 }

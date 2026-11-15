@@ -9,11 +9,16 @@ import java.util.regex.Pattern;
 /**
  * W3C Trace Context 的 {@code traceparent}：{@code version-traceid-spanid-flags}。
  *
+ * <p>是否采样只看标志的最低位（W3C 的 {@code sampled}），其余位原样保留、不解释（RFC-0003 规则 7，ADR-0233）。
+ *
  * @param traceId 追踪 ID，32 位小写十六进制，不能全为零
  * @param spanId Span ID（parent-id），16 位小写十六进制，不能全为零
- * @param sampled 采样标志（trace-flags 的最低位）
+ * @param flags trace-flags，0 到 255
  */
-public record TraceParent(String traceId, String spanId, boolean sampled) {
+public record TraceParent(String traceId, String spanId, int flags) {
+    /** 采样位。 */
+    public static final int SAMPLED = 0x01;
+
     /** traceparent 文法：版本、追踪 ID、Span ID 与标志，都是小写十六进制。 */
     private static final Pattern PATTERN = Pattern.compile("^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$");
 
@@ -28,8 +33,8 @@ public record TraceParent(String traceId, String spanId, boolean sampled) {
      *
      * @param traceId 追踪 ID
      * @param spanId Span ID
-     * @param sampled 采样标志
-     * @throws IllegalArgumentException ID 不合格式或全为零
+     * @param flags trace-flags
+     * @throws IllegalArgumentException ID 不合格式或全为零，或标志不在 0 到 255 之间
      */
     public TraceParent {
         if (!isTraceId(traceId)) {
@@ -38,6 +43,18 @@ public record TraceParent(String traceId, String spanId, boolean sampled) {
         if (!isSpanId(spanId)) {
             throw new IllegalArgumentException("The span ID '" + spanId + "' must be 16 lowercase hexadecimal digits, not all zero.");
         }
+        if (flags < 0 || flags > 0xFF) {
+            throw new IllegalArgumentException("The trace flags must be a byte, got " + flags + ".");
+        }
+    }
+
+    /**
+     * 判断是否采样：标志的最低位。
+     *
+     * @return 采样时为真
+     */
+    public boolean sampled() {
+        return (flags & SAMPLED) == SAMPLED;
     }
 
     /**
@@ -54,9 +71,8 @@ public record TraceParent(String traceId, String spanId, boolean sampled) {
         if (!match.matches() || ZERO_TRACE_ID.equals(match.group(2)) || ZERO_SPAN_ID.equals(match.group(3))) {
             return Optional.empty();
         }
-        // 采样位是 trace-flags 的最低位；其他位留给以后的标志
-        boolean sampled = (Integer.parseInt(match.group(4), 16) & 0x01) == 0x01;
-        return Optional.of(new TraceParent(match.group(2), match.group(3), sampled));
+        // 标志整字节保留：采样位是最低位，其他位留给以后的标志，原样传下去
+        return Optional.of(new TraceParent(match.group(2), match.group(3), Integer.parseInt(match.group(4), 16)));
     }
 
     /**
@@ -104,7 +120,7 @@ public record TraceParent(String traceId, String spanId, boolean sampled) {
      */
     @Override
     public String toString() {
-        return "00-" + traceId + "-" + spanId + "-" + (sampled ? "01" : "00");
+        return "00-" + traceId + "-" + spanId + "-" + HEX[flags >> 4] + HEX[flags & 0xF];
     }
 
     /**
