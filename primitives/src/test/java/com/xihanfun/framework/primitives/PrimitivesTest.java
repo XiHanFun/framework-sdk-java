@@ -130,7 +130,7 @@ class PrimitivesTest {
         Error error = Error.notFound("ORDERS_NOTFOUND_001", "orders.missing", Map.of("id", 42));
         assertEquals("订单 42 不存在。", error.message());
         assertEquals("literal", error.withText("literal").message(), "text wins");
-        assertEquals("a of 007", MessageTemplate.format("{0} of {count:%03d}", Map.of("0", "a", "count", 7)));
+        assertEquals("a of 007", MessageTemplate.format("{0} of {count:D3}", Map.of("0", "a", "count", 7)));
         assertEquals("{missing}", MessageTemplate.format("{missing}", Map.of()), "missing placeholders stay");
         // 占位符缺参数时严格解析失败，退回描述
         assertEquals("orders.missing", Error.notFound("ORDERS_NOTFOUND_001", "orders.missing").message());
@@ -156,14 +156,15 @@ class PrimitivesTest {
         assertEquals("json {\"a\": 1} 2", MessageTemplate.format("json {\"a\": 1} {0}", MessageArguments.positional(2)));
         assertEquals("open { brace", MessageTemplate.format("open { brace", Map.of()));
         assertEquals(List.of("a", "b"), MessageTemplate.placeholdersOf("{a} {b:%d} {a} {{c}}"));
-        assertEquals(Optional.empty(), MessageTemplate.tryFormat("{a} {b}", Map.of("a", 1), java.util.Locale.ROOT));
+        assertEquals(Optional.empty(), MessageTemplate.tryFormat("{a} {b}", Map.of("a", 1)));
         assertEquals("1.5 and 2", MessageTemplate.format("{0} and {1}", MessageArguments.positional(1.5, 2.0)));
         Map<String, Object> withNull = new LinkedHashMap<>();
         withNull.put("b", null);
         withNull.put("a", "x");
         assertEquals("kernel.feature.start_failed (a=x, b=)", MessageTemplate.describe("kernel.feature.start_failed", withNull));
-        // 格式说明与参数不符：占位符原样保留
-        assertEquals("{n:%d}", MessageTemplate.format("{n:%d}", Map.of("n", "text")));
+        // 说明符与值的类型不符、或不是可移植的说明符：按无格式输出，不报错（RFC-0010「模板」）
+        assertEquals("text", MessageTemplate.format("{n:D}", Map.of("n", "text")));
+        assertEquals("7", MessageTemplate.format("{n:%03d}", Map.of("n", 7)), "printf specifiers are not portable and print the plain value");
     }
 
     @Test
