@@ -1,6 +1,17 @@
+# Maven 构建产物（容器以 root 写出，不提交）
+target/
+*.class
+*.jar
+!.mvn/wrapper/*.jar
+dependency-reduced-pom.xml
+
 # 编辑器
 .idea/
+*.iml
 .vs/
 .vscode/
+.classpath
+.project
+.settings/
 *.swp
 .DS_Store
