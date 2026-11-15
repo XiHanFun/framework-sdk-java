@@ -35,6 +35,7 @@
 
   <modules>
     <module>primitives</module>
+    <module>manifest</module>
   </modules>
 
   <properties>
