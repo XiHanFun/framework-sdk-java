@@ -37,6 +37,7 @@
     <module>primitives</module>
     <module>manifest</module>
     <module>invocation</module>
+    <module>pipeline</module>
   </modules>
 
   <properties>
