@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 调用上下文（RFC-0003）：取消与截止时间、W3C 追踪、已登记的 Baggage、对象袋 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.xihanfun</groupId>
+    <artifactId>xihan-framework-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>xihan-framework-invocation</artifactId>
+  <name>XiHan Framework Invocation</name>
+  <description>调用上下文：取消与截止时间、W3C 追踪、已登记的 Baggage 与请求作用域对象袋。</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.xihanfun</groupId>
+      <artifactId>xihan-framework-primitives</artifactId>
+    </dependency>
+  </dependencies>
+</project>
