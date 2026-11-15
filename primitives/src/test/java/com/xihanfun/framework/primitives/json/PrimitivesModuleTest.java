@@ -50,9 +50,9 @@ class PrimitivesModuleTest {
         assertThrows(MismatchedInputException.class, () -> mapper.readValue("{\"code\":\"bad\",\"message\":\"x\"}", Error.class),
                 "an invalid code on the wire must be rejected");
         assertThrows(MismatchedInputException.class, () -> mapper.readValue("{\"code\":\"ORDERS_CONFLICT_001\"}", Error.class),
-                "an error needs a message or a message key");
+                "an error needs a message");
         assertThrows(MismatchedInputException.class,
-                () -> mapper.readValue("{\"code\":\"ORDERS_CONFLICT_001\",\"messageKey\":\"Bad Key\"}", Error.class));
+                () -> mapper.readValue("{\"code\":\"ORDERS_CONFLICT_001\",\"message\":\"x\",\"messageKey\":\"Bad Key\"}", Error.class));
     }
 
     @Test
@@ -71,9 +71,11 @@ class PrimitivesModuleTest {
         Result<Map<String, Object>> decoded = mapper.readValue(json, new TypeReference<>() { });
         assertTrue(decoded.isFailed());
         assertEquals("ORDERS_CONFLICT_001", decoded.error().orElseThrow().code());
-        assertEquals("{\"ok\":true,\"value\":{}}", mapper.writeValueAsString(Result.success()));
+        assertEquals("{\"ok\":true}", mapper.writeValueAsString(Result.success()), "a success without a value only writes ok");
         Result<Unit> unit = mapper.readValue("{\"ok\":true}", new TypeReference<>() { });
         assertEquals(Result.success(), unit);
+        assertThrows(MismatchedInputException.class, () -> mapper.readValue("{\"ok\":true,\"value\":{}}", new TypeReference<Result<Unit>>() { }),
+                "a success without a value must not carry one");
         Result<Integer> number = mapper.readValue("{\"ok\":true,\"value\":5}", new TypeReference<>() { });
         assertEquals(Optional.of(5), number.value());
         assertThrows(MismatchedInputException.class, () -> mapper.readValue("{\"ok\":false}", new TypeReference<Result<Integer>>() { }),

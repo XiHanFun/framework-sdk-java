@@ -2,6 +2,7 @@ package com.xihanfun.framework.primitives.json;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.BeanProperty;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JavaType;
@@ -74,6 +75,9 @@ final class MaybeCodec {
 
         @Override
         public Maybe<?> deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            if (parser.currentToken() == JsonToken.VALUE_NULL) {
+                return Maybe.none();
+            }
             JavaType type = valueType != null ? valueType : context.constructType(Object.class);
             return Maybe.ofNullable(context.readValue(parser, type));
         }

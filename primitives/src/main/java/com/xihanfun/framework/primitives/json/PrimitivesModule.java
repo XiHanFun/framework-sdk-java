@@ -16,16 +16,17 @@ import java.io.Serial;
  *
  * <p>编码：
  * <ul>
- *   <li>{@link Result}：{@code {"ok":true,"value":…}} 或 {@code {"ok":false,"error":{…}}}；{@code Result<Unit>} 的值是 {@code {}}</li>
- *   <li>{@link Error}：{@code {"code":…,"message":…,"messageKey":…,"details":{…},"inner":{…}}}，没有的字段省略；
- *       {@code message} 是发送端已解析的文案，{@code messageKey} 让接收端可再翻译</li>
+ *   <li>{@link Result}：{@code {"ok":true,"value":…}} 或 {@code {"ok":false,"error":{…}}}；无值成功 {@code Result<Unit>} 只写
+ *       {@code {"ok":true}}，读到带 {@code value} 的即拒绝；{@code Result<Maybe<T>>} 的无值是 {@code "value":null}</li>
+ *   <li>{@link Error}：{@code {"code":…,"message":…,"messageKey":…,"details":{…},"inner":{…}}}，没有的成员不写，也不许写成 {@code null}；
+ *       {@code message} 必填，是发送端已解析的文案，{@code messageKey} 让接收端可再翻译</li>
  *   <li>{@link Maybe}：有值为值本身，无值为 {@code null}；对象里缺这个字段也解码为无值</li>
  *   <li>{@link TypedId}：底层值的编码</li>
  *   <li>{@link Stability}、{@link PipelineStage}：清单里的小写名；{@link LifecycleState}：状态名</li>
  * </ul>
  *
- * <p>解码是严格的：错误码不合法、失败结果没有错误、成功结果没有值（{@code Result<Unit>} 除外）都以 Jackson 的
- * {@code MismatchedInputException} 拒绝，不静默补默认值。
+ * <p>解码按 RFC-0001「Result」的规则（ADR-0233，向量 {@code conformance/vectors/primitives/wire-encoding.json}）：
+ * 不合规则的以 Jackson 的 {@code MismatchedInputException} 拒绝，不静默补默认值；Result 与 Error 的未知成员忽略。
  *
  * <p>Jackson 是本模块的可选依赖，不能以 {@code requires transitive} 强加给下游；用编码的模块自己 {@code requires com.fasterxml.jackson.databind}。
  */

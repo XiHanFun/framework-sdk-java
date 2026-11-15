@@ -6,25 +6,28 @@ import com.fasterxml.jackson.databind.BeanProperty;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.deser.ContextualDeserializer;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import com.xihanfun.framework.primitives.Maybe;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
 import java.io.IOException;
 import java.io.Serial;
 
 /**
- * {@link Result} 的线上编码：{@code {"ok":true,"value":…}} 或 {@code {"ok":false,"error":{…}}}。
+ * {@link Result} 的线上编码（RFC-0001「Result」，ADR-0233）：
+ * 有值成功 {@code {"ok":true,"value":…}}，无值成功（{@code Result<Unit>}）只写 {@code {"ok":true}}，失败 {@code {"ok":false,"error":{…}}}。
  */
 final class ResultCodec {
     private ResultCodec() {
     }
 
     /**
-     * 写出 {@code ok} 与 {@code value} 或 {@code error}。
+     * 写出 {@code ok} 与 {@code value} 或 {@code error}；无值成功不写 {@code value}。
      */
     static final class Serializer extends StdSerializer<Result<?>> {
         @Serial
@@ -39,8 +42,12 @@ final class ResultCodec {
             generator.writeStartObject();
             if (result.isOk()) {
                 generator.writeBooleanField("ok", true);
-                generator.writeFieldName("value");
-                provider.defaultSerializeValue(result.value().orElseThrow(), generator);
+                Object value = result.value().orElseThrow();
+                // 无值成功只写 ok：以前写成 {"ok":true,"value":{}}，与 .NET 的 {"ok":true} 互相读不出（ADR-0233）
+                if (value != Unit.VALUE) {
+                    generator.writeFieldName("value");
+                    provider.defaultSerializeValue(value, generator);
+                }
             } else {
                 generator.writeBooleanField("ok", false);
                 generator.writeFieldName("error");
@@ -51,7 +58,14 @@ final class ResultCodec {
     }
 
     /**
-     * 按 {@code Result<T>} 的类型参数解码成功值；{@code Result<Unit>} 不要求有值，其他成功结果必须带非 {@code null} 的值。
+     * 按 {@code Result<T>} 的类型参数解码：
+     * <ul>
+     *   <li>{@code ok} 必填，是布尔；成功不能带 {@code error}，失败不能带 {@code value}，失败的 {@code error} 必填且不是 {@code null}</li>
+     *   <li>{@code Result<Unit>}：成功不能带 {@code value}，{@code {}} 与 {@code null} 也不行</li>
+     *   <li>{@code Result<Maybe<T>>}：{@code value} 必填，{@code null} 即无值</li>
+     *   <li>其余：{@code value} 必填且不是 {@code null}</li>
+     * </ul>
+     * 未知成员忽略。
      */
     static final class Deserializer extends StdDeserializer<Result<?>> implements ContextualDeserializer {
         @Serial
@@ -79,32 +93,59 @@ final class ResultCodec {
         public Result<?> deserialize(JsonParser parser, DeserializationContext context) throws IOException {
             JsonNode node = context.readTree(parser);
             if (!node.isObject()) {
-                return context.reportInputMismatch(Result.class, "%s", "A result on the wire must be a JSON object.");
+                return fail(context, "A result on the wire must be a JSON object.");
             }
             JsonNode ok = node.get("ok");
             if (ok == null || !ok.isBoolean()) {
-                return context.reportInputMismatch(Result.class, "%s", "A result on the wire needs a boolean 'ok'.");
+                return fail(context, "A result on the wire needs a boolean 'ok'.");
             }
-            if (ok.booleanValue()) {
-                JavaType type = valueType != null ? valueType : context.constructType(Object.class);
-                if (type.hasRawClass(Unit.class)) {
-                    return Result.success();
-                }
-                JsonNode value = node.get("value");
-                if (value == null || value.isNull()) {
-                    return context.reportInputMismatch(Result.class, "%s", "A successful result on the wire needs a value.");
-                }
-                Object decoded = context.readTreeAsValue(value, type);
-                if (decoded == null) {
-                    return context.reportInputMismatch(Result.class, "%s", "A successful result on the wire needs a value.");
-                }
-                return Result.ok(decoded);
-            }
+            JsonNode value = node.get("value");
             JsonNode error = node.get("error");
-            if (error == null || error.isNull()) {
-                return context.reportInputMismatch(Result.class, "%s", "A failed result on the wire needs an error.");
+            if (!ok.booleanValue()) {
+                if (value != null) {
+                    return fail(context, "A failed result on the wire must not carry a 'value'.");
+                }
+                if (error == null || error.isNull()) {
+                    return fail(context, "A failed result on the wire needs an error.");
+                }
+                return Result.fail(ErrorCodec.Deserializer.fromNode(error, context));
             }
-            return Result.fail(ErrorCodec.Deserializer.fromNode(error, context));
+            if (error != null) {
+                return fail(context, "A successful result on the wire must not carry an 'error'.");
+            }
+            JavaType type = valueType != null ? valueType : context.constructType(Object.class);
+            if (type.hasRawClass(Unit.class)) {
+                if (value != null) {
+                    return fail(context, "A successful result without a value is written as {\"ok\":true}; it must not carry a 'value'.");
+                }
+                return Result.success();
+            }
+            if (value == null) {
+                return fail(context, "A successful result on the wire needs a 'value'.");
+            }
+            if (type.hasRawClass(Maybe.class) && value.isNull()) {
+                return Result.ok(Maybe.none());
+            }
+            if (value.isNull()) {
+                return fail(context, "The 'value' of a successful result must not be null.");
+            }
+            Object decoded = context.readTreeAsValue(value, type);
+            if (decoded == null) {
+                return fail(context, "The 'value' of a successful result must not be null.");
+            }
+            return Result.ok(decoded);
+        }
+
+        /**
+         * JSON 的 {@code null} 不是结果：结果总有 {@code ok}，不以 {@code null} 表示没有。
+         */
+        @Override
+        public Result<?> getNullValue(DeserializationContext context) throws JsonMappingException {
+            return context.reportInputMismatch(Result.class, "%s", "A result on the wire must be a JSON object, not null.");
+        }
+
+        private static Result<?> fail(DeserializationContext context, String message) throws IOException {
+            return context.reportInputMismatch(Result.class, "%s", message);
         }
     }
 }

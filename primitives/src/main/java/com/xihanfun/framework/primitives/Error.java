@@ -332,27 +332,23 @@ public final class Error {
     }
 
     /**
-     * 从线上编码还原错误：消息键与文案至少有一个。
+     * 从线上编码还原错误（RFC-0001「Result」）：线上的 {@code message} 必填，是发送端已解析的文案，还原为 {@link #text()}；
+     * 有消息键时接收端可以按自己的目录再翻译。
      *
      * <p>供 JSON 编码与协议适配器使用；业务代码用 {@link #of} 或 {@link #literal}。
      *
      * @param code 错误码
-     * @param messageKey 消息键；空表示没有
-     * @param text 发送端已解析的文案；空表示没有
+     * @param messageKey 消息键；空表示没有（Literal）
+     * @param message 发送端已解析的文案，不能为空串
      * @param details 细节
      * @param inner 内部错误；空表示没有
      * @return 错误
-     * @throws IllegalArgumentException 错误码、消息键或细节不合法，或消息键与文案都没有
+     * @throws IllegalArgumentException 错误码、消息键或细节不合法，或文案为空
      */
-    public static Error restore(String code, Optional<String> messageKey, Optional<String> text, Map<String, ?> details,
-            Optional<Error> inner) {
+    public static Error restore(String code, Optional<String> messageKey, String message, Map<String, ?> details, Optional<Error> inner) {
         ErrorCode.validate(code);
         messageKey.ifPresent(MessageTemplate::validateKey);
-        if (messageKey.isEmpty() && text.filter(value -> !value.isEmpty()).isEmpty()) {
-            throw new IllegalArgumentException("The error '" + code + "' needs a message or a message key.");
-        }
-        return new Error(code, messageKey.orElse(null), text.filter(value -> !value.isEmpty()).orElse(null),
-                JsonValues.copyObject(details), inner.orElse(null));
+        return new Error(code, messageKey.orElse(null), requireText(message), JsonValues.copyObject(details), inner.orElse(null));
     }
 
     /**
