@@ -25,6 +25,15 @@ public final class InvocationErrors {
     }
 
     /**
+     * 创建「开始前已超时」的错误：建上下文时截止时间就已经过了。
+     *
+     * @return {@code KERNEL_TIMEOUT_001}，消息键 {@value InvocationMessages#DEADLINE_BEFORE_START}
+     */
+    public static Error deadlineBeforeStart() {
+        return Error.timeout(DEADLINE_EXCEEDED, InvocationMessages.DEADLINE_BEFORE_START);
+    }
+
+    /**
      * 创建取消错误。
      *
      * @return {@code KERNEL_CANCELLED_001}，消息键 {@value InvocationMessages#CANCELLED}

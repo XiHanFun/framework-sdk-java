@@ -63,21 +63,25 @@ public final class MessageScope {
     }
 
     /**
-     * 用进程默认的解析器与区域解析消息键。
+     * 用进程默认的解析器与区域解析消息键；翻译不出时退回 SDK 自带的内核消息英文模板（{@link KernelMessages}），
+     * 与 RFC-0010 的回退链以 en-US 结尾一致。
      *
      * @param key 消息键
      * @param arguments 模板参数
-     * @return 文案；没有解析器或解析失败时为空
+     * @return 文案；都解析不出（没有该键或占位符缺值）时为空，调用方退回描述
      */
     public static Optional<String> resolve(String key, Map<String, ?> arguments) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(arguments, "arguments");
         // 读一次快照：解析器与区域来自同一次设置，不会读到一半新一半旧
         Snapshot snapshot = current;
-        if (snapshot.resolver() == null) {
-            return Optional.empty();
+        if (snapshot.resolver() != null) {
+            Optional<String> resolved = snapshot.resolver().resolve(key, snapshot.locale(), arguments);
+            if (resolved.isPresent()) {
+                return resolved;
+            }
         }
-        return snapshot.resolver().resolve(key, snapshot.locale(), arguments);
+        return KernelMessages.catalog().resolve(key, KernelMessages.LOCALE, arguments);
     }
 
     /**

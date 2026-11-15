@@ -148,7 +148,8 @@ class OperationInvokerTest {
         FrameworkException full = assertThrows(FrameworkException.class,
                 () -> registry.add(OperationContract.of("items.overflow"), Unit.class, Unit.class, handler));
         assertEquals(OperationErrors.REGISTRY_FULL, full.code());
-        assertEquals("The operation registry is full (10000 operations).", full.getMessage());
+        assertEquals("The operation registry has reached its capacity of 10000.", full.getMessage());
+        assertEquals(Map.of("capacity", 10000), full.toError().details());
         FrameworkException duplicate = assertThrows(FrameworkException.class,
                 () -> registry.add(OperationContract.of("items-0.list"), Unit.class, Unit.class, handler));
         assertEquals(OperationErrors.DUPLICATE, duplicate.code(), "a duplicate is reported as such even when the registry is full");

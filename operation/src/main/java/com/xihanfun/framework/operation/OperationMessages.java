@@ -16,6 +16,12 @@ public final class OperationMessages {
     /** 管道成功结束却没有执行到操作、没有响应；参数 {@code id}。 */
     public static final String NO_RESPONSE = "kernel.operation.no_response";
 
+    /** 操作 ID 重复登记（配置期）；参数 {@code id} 与已登记者的 {@code owner}。 */
+    public static final String DUPLICATE = "kernel.operation.duplicate";
+
+    /** 操作登记表已满（配置期）；参数 {@code capacity}。 */
+    public static final String REGISTRY_FULL = "kernel.operation.registry_full";
+
     private OperationMessages() {
     }
 }

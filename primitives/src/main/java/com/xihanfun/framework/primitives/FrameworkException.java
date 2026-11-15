@@ -18,6 +18,20 @@ public class FrameworkException extends RuntimeException {
     /** 错误码。 */
     private final String code;
 
+    /** 带消息键与参数的错误；以说明创建的异常为 {@code null}。错误不可序列化，异常被序列化后退回以说明转换。 */
+    private final transient Error error;
+
+    /**
+     * 以带消息键与参数的错误创建异常：内核在配置期报告共用的错误（如操作重复登记）时用它，码、键与参数与调用期的错误一样上线。
+     *
+     * @param error 错误；说明取 {@link Error#message()}
+     */
+    public FrameworkException(Error error) {
+        super(Objects.requireNonNull(error, "error").message());
+        this.code = error.code();
+        this.error = error;
+    }
+
     /**
      * 创建异常，没有底层原因。
      *
@@ -40,6 +54,7 @@ public class FrameworkException extends RuntimeException {
     public FrameworkException(String code, String message, Throwable cause) {
         super(requireMessage(message), cause);
         this.code = ErrorCode.validate(code);
+        this.error = null;
     }
 
     /**
@@ -52,13 +67,16 @@ public class FrameworkException extends RuntimeException {
     }
 
     /**
-     * 转换成可以上线的 {@link Error}：以说明为已解析文案的 Literal 错误。
+     * 转换成可以上线的 {@link Error}：以错误创建的异常原样返回那个错误；其余是以说明为已解析文案的 Literal 错误。
      *
      * <p>底层原因也是 {@code FrameworkException} 时成为 {@link Error#inner()}，与 .NET 参考实现一致。
      *
      * @return 对应的错误
      */
     public Error toError() {
+        if (error != null) {
+            return error;
+        }
         if (getCause() instanceof FrameworkException framework) {
             return Error.literal(code, getMessage(), Map.of(), framework.toError());
         }

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.xihanfun.framework.primitives.BaggageKeys;
+import com.xihanfun.framework.primitives.Error;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -116,6 +117,34 @@ class ContextTest {
 
         Context expired = Context.builder().deadline(Instant.now().minusSeconds(1)).build();
         assertEquals(InvocationErrors.DEADLINE_EXCEEDED, expired.cancellation().orElseThrow().code(), "a past deadline fires at once");
+        assertEquals(Optional.of(InvocationMessages.DEADLINE_BEFORE_START), expired.cancellation().orElseThrow().messageKey(),
+                "a deadline that passed before the context was built is reported as before the start");
+    }
+
+    @Test
+    void kernelErrorsFollowTheVectors() throws Exception {
+        Map<String, Error> produced = new java.util.HashMap<>();
+        Context timedOut = Context.builder().timeout(Duration.ofMillis(200)).build();
+        assertTrue(timedOut.awaitCancellation(Duration.ofSeconds(5)));
+        produced.put(InvocationMessages.DEADLINE_EXCEEDED, timedOut.cancellation().orElseThrow());
+        produced.put(InvocationMessages.DEADLINE_BEFORE_START,
+                Context.builder().deadline(Instant.now().minusSeconds(1)).build().cancellation().orElseThrow());
+        try (CancellableContext scope = Context.background().withCancellation()) {
+            scope.cancel();
+            produced.put(InvocationMessages.CANCELLED, scope.context().cancellation().orElseThrow());
+        }
+        int checked = 0;
+        for (var message : Vectors.read("primitives/kernel-messages.json").get("messages")) {
+            Error error = produced.get(message.get("key").textValue());
+            if (error == null) {
+                continue;
+            }
+            checked++;
+            assertEquals(message.get("code").textValue(), error.code(), message.get("key").textValue());
+            assertEquals(Vectors.strings(message.get("arguments")), List.copyOf(error.details().keySet()));
+            assertEquals(message.get("template").textValue(), error.message(), "the built-in English template");
+        }
+        assertEquals(3, checked);
     }
 
     @Test

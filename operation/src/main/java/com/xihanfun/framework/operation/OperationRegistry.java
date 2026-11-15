@@ -2,10 +2,12 @@ package com.xihanfun.framework.operation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xihanfun.framework.pipeline.PipelineBuilder;
+import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -147,11 +149,14 @@ public final class OperationRegistry {
         registration.lock();
         try {
             // 先判重复、再判容量：重复的 ID 不论表满不满都报重复
-            if (descriptors.containsKey(contract.id())) {
-                throw new FrameworkException(OperationErrors.DUPLICATE, "The operation '" + contract.id() + "' is already registered.");
+            // 配置期的两个错误与调用期一样带内核共用的码、键与参数（RFC-0011「错误码」），以 FrameworkException 抛出
+            OperationDescriptor existing = descriptors.get(contract.id());
+            if (existing != null) {
+                throw new FrameworkException(Error.of(OperationErrors.DUPLICATE, OperationMessages.DUPLICATE,
+                        Map.of("id", contract.id(), "owner", existing.owner())));
             }
             if (descriptors.size() >= CAPACITY) {
-                throw new FrameworkException(OperationErrors.REGISTRY_FULL, "The operation registry is full (" + CAPACITY + " operations).");
+                throw new FrameworkException(Error.of(OperationErrors.REGISTRY_FULL, OperationMessages.REGISTRY_FULL, Map.of("capacity", CAPACITY)));
             }
             descriptors.put(contract.id(), descriptor);
         } finally {
