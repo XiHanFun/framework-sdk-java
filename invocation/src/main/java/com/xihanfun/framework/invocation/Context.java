@@ -133,13 +133,14 @@ public final class Context {
     /**
      * 把取消与超时翻译成原语层错误。
      *
-     * @return 截止令牌已触发为 {@code KERNEL_TIMEOUT_001}（建上下文时截止时间就已过的消息键是
-     *     {@value InvocationMessages#DEADLINE_BEFORE_START}，否则是 {@value InvocationMessages#DEADLINE_EXCEEDED}），
-     *     只有外部取消为 {@code KERNEL_CANCELLED_001}；未取消时为空
+     * <p>建上下文时不判断「开始前已超时」：那由调用器在第一个中间件之前按时钟核对（RFC-0011 规则 10，ADR-0235）。
+     *
+     * @return 截止令牌已触发为 {@code KERNEL_TIMEOUT_001} + {@value InvocationMessages#DEADLINE_EXCEEDED}，只有外部取消为
+     *     {@code KERNEL_CANCELLED_001}；未取消时为空
      */
     public Optional<Error> cancellation() {
         if (cancellation.isDeadlineFired()) {
-            return Optional.of(cancellation.isExpiredAtStart() ? InvocationErrors.deadlineBeforeStart() : InvocationErrors.deadlineExceeded());
+            return Optional.of(InvocationErrors.deadlineExceeded());
         }
         if (cancellation.isCancelledExternally()) {
             return Optional.of(InvocationErrors.cancelled());

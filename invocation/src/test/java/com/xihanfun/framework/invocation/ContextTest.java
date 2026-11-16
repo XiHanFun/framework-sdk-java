@@ -144,8 +144,8 @@ class ContextTest {
 
         Context expired = Context.builder().deadline(Instant.now().minusSeconds(1)).build();
         assertEquals(InvocationErrors.DEADLINE_EXCEEDED, expired.cancellation().orElseThrow().code(), "a past deadline fires at once");
-        assertEquals(Optional.of(InvocationMessages.DEADLINE_BEFORE_START), expired.cancellation().orElseThrow().messageKey(),
-                "a deadline that passed before the context was built is reported as before the start");
+        assertEquals(Optional.of(InvocationMessages.DEADLINE_EXCEEDED), expired.cancellation().orElseThrow().messageKey(),
+                "building a context does not decide 'before the start'; the invoker does (RFC-0011 rule 10)");
     }
 
     @Test
@@ -154,8 +154,7 @@ class ContextTest {
         Context timedOut = Context.builder().timeout(Duration.ofMillis(200)).build();
         assertTrue(timedOut.awaitCancellation(Duration.ofSeconds(5)));
         produced.put(InvocationMessages.DEADLINE_EXCEEDED, timedOut.cancellation().orElseThrow());
-        produced.put(InvocationMessages.DEADLINE_BEFORE_START,
-                Context.builder().deadline(Instant.now().minusSeconds(1)).build().cancellation().orElseThrow());
+        produced.put(InvocationMessages.DEADLINE_BEFORE_START, InvocationErrors.deadlineBeforeStart());
         try (CancellableContext scope = Context.background().withCancellation()) {
             scope.cancel();
             produced.put(InvocationMessages.CANCELLED, scope.context().cancellation().orElseThrow());

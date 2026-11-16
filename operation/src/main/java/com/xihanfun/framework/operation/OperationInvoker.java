@@ -9,6 +9,7 @@ import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
 import java.io.InterruptedIOException;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -131,6 +132,11 @@ public final class OperationInvoker {
      * {@code System.Logger}，不上线；{@link java.lang.Error}（虚拟机错误、断言失败）不翻译、照常抛出。
      */
     private Result<Unit> run(Context context, String id) {
+        // SDK 没有截止时间中间件：调用器在第一个中间件之前按时钟核对，已到即结束、管道不执行（RFC-0011 规则 10）
+        Optional<Instant> deadline = context.deadline();
+        if (deadline.isPresent() && !Instant.now().isBefore(deadline.get())) {
+            return Result.fail(InvocationErrors.deadlineBeforeStart());
+        }
         try {
             return pipeline.invoke(context);
         } catch (Exception thrown) {

@@ -89,6 +89,27 @@ class UnhandledExceptionTest {
     }
 
     @Test
+    void anExpiredDeadlineStopsTheCallBeforeTheFirstMiddleware() {
+        // RFC-0011 规则 10：调用器在第一个中间件之前按时钟核对截止时间，已到即结束、管道不执行
+        java.util.concurrent.atomic.AtomicInteger entered = new java.util.concurrent.atomic.AtomicInteger();
+        PipelineBuilder pipeline = new PipelineBuilder().useAt(Middleware.of("Count", (context, next) -> {
+            entered.incrementAndGet();
+            return next.invoke(context);
+        }), PipelineStage.OBSERVE);
+        OperationInvoker invoker = invoker((context, request) -> Result.success(), pipeline);
+        Context expired = Context.builder().deadline(java.time.Instant.now().minusSeconds(1)).build();
+        Error error = xgi(invoker, expired);
+        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, error.code());
+        assertEquals(Optional.of("kernel.invocation.deadline_before_start"), error.messageKey());
+        assertEquals("The invocation exceeded its deadline before it started.", error.message());
+        assertEquals(Optional.of("kernel.invocation.deadline_before_start"),
+                invoker.invoke(expired, "jobs.run", Unit.VALUE, Unit.class).error().orElseThrow().messageKey());
+        assertEquals(0, entered.get(), "the pipeline does not run");
+        assertTrue(invoker.invoke(Context.builder().timeout(java.time.Duration.ofSeconds(30)).build(), OperationRequest.of("jobs.run")).isOk());
+        assertEquals(1, entered.get());
+    }
+
+    @Test
     void aMissingResultIsAnUnhandledFault() {
         OperationInvoker invoker = invoker((context, request) -> null, new PipelineBuilder());
         assertUnhandled(xgi(invoker, Context.background()));

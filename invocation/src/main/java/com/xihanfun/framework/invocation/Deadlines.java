@@ -27,7 +27,7 @@ final class Deadlines {
             return;
         }
         if (nanos <= 0) {
-            state.fireDeadlineAtStart();
+            state.fireDeadline();
             return;
         }
         TIMER.schedule(() -> {

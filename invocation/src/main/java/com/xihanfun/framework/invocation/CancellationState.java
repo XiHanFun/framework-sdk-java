@@ -31,9 +31,6 @@ final class CancellationState {
     /** 截止令牌：自己的定时器已触发。父级的截止令牌另看父级。 */
     private volatile boolean deadlineFired;
 
-    /** 创建时截止时间就已经过了：截止令牌在创建时置位，归因为「调用开始前已超时」。 */
-    private volatile boolean expiredAtStart;
-
     /** 外部令牌：调用方经 {@link CancellableContext#cancel()} 取消了。 */
     private volatile boolean cancelled;
 
@@ -104,26 +101,6 @@ final class CancellationState {
 
     boolean isCancelled() {
         return isDeadlineFired() || isCancelledExternally();
-    }
-
-    /**
-     * 触发了的截止令牌是不是在创建时就已到期：沿父链取第一个已触发的截止令牌，看它的状态创建时截止时间是否已过。
-     */
-    boolean isExpiredAtStart() {
-        for (CancellationState state = this; state != null; state = state.parent) {
-            if (state.deadlineFired) {
-                return state.expiredAtStart;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 创建时截止时间已过：立即置位截止令牌，并记下是开始前就到期的。
-     */
-    void fireDeadlineAtStart() {
-        expiredAtStart = true;
-        fireDeadline();
     }
 
     /**

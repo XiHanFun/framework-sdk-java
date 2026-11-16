@@ -47,7 +47,7 @@ public final class InvocationErrors {
     }
 
     /**
-     * 创建「开始前已超时」的错误：建上下文时截止时间就已经过了。
+     * 创建「开始前已超时」的错误：调用器在第一个中间件之前核对截止时间，已到即以它结束、管道不执行（RFC-0011 规则 10）。
      *
      * @return {@code KERNEL_TIMEOUT_001}，消息键 {@value InvocationMessages#DEADLINE_BEFORE_START}
      */
