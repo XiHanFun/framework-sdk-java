@@ -194,7 +194,9 @@ public final class ManifestJson {
             if (contributes != null) {
                 builder.contributes(contributions(contributes));
             }
-            builder.activation(strings(object, "activation"));
+            if (object.has("activation")) {
+                builder.activation(strings(object, "activation"));
+            }
             builder.permissions(strings(object, "permissions"));
             optionalString(object, "entry").ifPresent(builder::entry);
             return builder.build();

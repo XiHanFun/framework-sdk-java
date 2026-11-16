@@ -99,6 +99,7 @@ public final class Manifest {
         builder.bindings = bindings;
         builder.contributes = contributes;
         builder.activation = activation;
+        builder.activationDeclared = !activation.isEmpty();
         builder.permissions = permissions;
         builder.entry = entry;
         return builder;
@@ -357,6 +358,9 @@ public final class Manifest {
         private List<Binding> bindings = List.of();
         private Contributions contributes;
         private List<String> activation = List.of();
+
+        /** 写过激活事件：区分「没写」（缺省 onStartup）与「写了空列表」（不合法）。 */
+        private boolean activationDeclared;
         private List<String> permissions = List.of();
         private String entry;
 
@@ -507,13 +511,14 @@ public final class Manifest {
         }
 
         /**
-         * 设置激活事件。
+         * 设置激活事件；写了就至少一项，空列表在 {@link #build()} 时拒绝（缺省 {@code ["onStartup"]} 只在不写时生效，ADR-0235）。
          *
          * @param value 激活事件，如 {@code onStartup}、{@code onOperation:orders.*}
          * @return 本构建器
          */
         public Builder activation(List<String> value) {
             this.activation = List.copyOf(value);
+            this.activationDeclared = true;
             return this;
         }
 
@@ -592,6 +597,9 @@ public final class Manifest {
                 if (!seen.add(binding.name())) {
                     throw invalid("'" + id + "' declares the binding '" + binding.name() + "' more than once.");
                 }
+            }
+            if (activationDeclared && activation.isEmpty()) {
+                throw invalid("The activation of '" + id + "' must list at least one event; leave it out to activate on startup.");
             }
             for (String event : activation) {
                 if (!ACTIVATION.matcher(event).matches()) {
