@@ -81,7 +81,8 @@ public final class MessageScope {
                 return resolved;
             }
         }
-        return KernelMessages.catalog().resolve(key, KernelMessages.LOCALE, arguments);
+        // 内置的是 en-US 模板，数字符号仍按进程默认区域（与本地化器回退到 en-US 时一致）
+        return KernelMessages.catalog().resolve(key, snapshot.locale(), arguments);
     }
 
     /**

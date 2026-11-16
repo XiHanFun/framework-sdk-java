@@ -35,10 +35,19 @@ class MessageTemplateVectorsTest {
             String name = vector.get("name").textValue();
             String template = vector.get("template").textValue();
             Map<String, Object> arguments = arguments(vector.get("arguments"));
-            assertEquals(vector.get("lenient").textValue(), MessageTemplate.format(template, arguments), name + " (lenient)");
             JsonNode strict = vector.get("strict");
-            assertEquals(strict.isNull() ? Optional.empty() : Optional.of(strict.textValue()), MessageTemplate.tryFormat(template, arguments),
-                    name + " (strict)");
+            Optional<String> expected = strict.isNull() ? Optional.empty() : Optional.of(strict.textValue());
+            if (vector.has("locale")) {
+                // 区域只改变小数点与分组符（ADR-0236）
+                String locale = vector.get("locale").textValue();
+                assertEquals(vector.get("lenient").textValue(), MessageTemplate.format(template, arguments, locale), name + " (lenient)");
+                assertEquals(expected, MessageTemplate.tryFormat(template, arguments, locale), name + " (strict)");
+                assertEquals(expected, MessageCatalog.of(Map.of("en-US", Map.of("a.b", template))).resolve("a.b", locale, arguments),
+                        name + " (catalog)");
+            } else {
+                assertEquals(vector.get("lenient").textValue(), MessageTemplate.format(template, arguments), name + " (lenient)");
+                assertEquals(expected, MessageTemplate.tryFormat(template, arguments), name + " (strict)");
+            }
         }
     }
 
@@ -54,7 +63,8 @@ class MessageTemplateVectorsTest {
     }
 
     /**
-     * 参数的 JSON 值按原类型交给格式化：整数为 Integer、浮点为 Double、布尔、字符串与 null；{@code null} 的参数表表示没有参数。
+     * 参数的 JSON 值按 Jackson 的缺省类型交给格式化：整数为 Integer / Long / BigInteger，浮点为 Double，数组为 List，对象为 Map；
+     * 格式化自己把它们归到值模型（超出 64 位的整数是浮点）。{@code null} 的参数表表示没有参数。
      */
     private static Map<String, Object> arguments(JsonNode node) {
         if (node == null || node.isNull()) {

@@ -58,7 +58,7 @@ class PrimitivesModuleTest {
     @Test
     void detailsAreEncodedSortedByName() throws Exception {
         Error error = Error.validation("ORDERS_VALIDATION_001", "orders.invalid", Map.of("z", 1, "a", Map.of("y", true, "b", 2.5)));
-        assertEquals("{\"code\":\"ORDERS_VALIDATION_001\",\"message\":\"orders.invalid (a={b=2.5, y=true}, z=1)\","
+        assertEquals("{\"code\":\"ORDERS_VALIDATION_001\",\"message\":\"orders.invalid (a={\\\"b\\\":2.5,\\\"y\\\":true}, z=1)\","
                 + "\"messageKey\":\"orders.invalid\",\"details\":{\"a\":{\"b\":2.5,\"y\":true},\"z\":1}}", mapper.writeValueAsString(error));
     }
 

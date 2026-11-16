@@ -72,7 +72,8 @@ public final class MessageCatalog implements MessageResolver {
     }
 
     /**
-     * 解析消息键：找到模板后严格渲染；可移植的格式说明符按不变文化解释（RFC-0010「模板」）。
+     * 解析消息键：找到模板后严格渲染；数字的小数点与分组符按请求的区域取（RFC-0010「模板」的固定表，ADR-0236），
+     * 回退到 en-US 的模板时仍按请求的区域。
      *
      * @param key 消息键
      * @param locale 区域名
@@ -83,7 +84,7 @@ public final class MessageCatalog implements MessageResolver {
     public Optional<String> resolve(String key, String locale, Map<String, ?> arguments) {
         Objects.requireNonNull(arguments, "arguments");
         return findTemplate(key, locale)
-                .flatMap(template -> MessageTemplate.tryFormat(template, arguments));
+                .flatMap(template -> MessageTemplate.tryFormat(template, arguments, locale));
     }
 
     /**
