@@ -184,6 +184,18 @@ class PipelineBuilderTest {
     }
 
     @Test
+    void copiesAreIndependent() {
+        PipelineBuilder original = new PipelineBuilder()
+                .useAt(passing("A"), PipelineStage.VALIDATE)
+                .useAt(passing("B"), PipelineStage.VALIDATE)
+                .before("B", "A");
+        PipelineBuilder copy = original.copy().useAt(passing("C"), PipelineStage.VALIDATE, Placement.BEGINNING, "xihan.kernel.core");
+        assertEquals("validate     C\nvalidate     B\nvalidate     A\n", copy.dump(), "the copy keeps the constraints and adds its own");
+        assertEquals("validate     B\nvalidate     A\n", original.dump(), "the original is unchanged");
+        assertCode(PipelineErrors.REGISTRATION, () -> original.copy().useAt(passing("A"), PipelineStage.VALIDATE));
+    }
+
+    @Test
     void stepsMustReturnAResult() {
         Step step = new PipelineBuilder().useAt(Middleware.of("Broken", (context, next) -> null), PipelineStage.OBSERVE)
                 .build(context -> Result.success());

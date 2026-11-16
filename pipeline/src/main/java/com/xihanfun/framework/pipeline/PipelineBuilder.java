@@ -50,6 +50,24 @@ public final class PipelineBuilder {
     }
 
     /**
+     * 复制一份构建器：登记、按名字的约束与登记顺序都相同，此后两份互不影响。调用器用它在使用者的管道上加内置步骤，不改使用者的构建器。
+     *
+     * @return 新的构建器
+     */
+    public PipelineBuilder copy() {
+        PipelineBuilder copy = new PipelineBuilder();
+        lock.lock();
+        try {
+            copy.registrations.addAll(registrations);
+            copy.constraints.addAll(constraints);
+            copy.sequence = sequence;
+        } finally {
+            lock.unlock();
+        }
+        return copy;
+    }
+
+    /**
      * 按清单里的阶段名解析阶段。
      *
      * @param name 阶段名，如 {@code observe}
