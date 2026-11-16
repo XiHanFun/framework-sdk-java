@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.deser.ContextualDeserializer;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import com.xihanfun.framework.primitives.JsonText;
 import com.xihanfun.framework.primitives.Maybe;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
@@ -68,7 +69,7 @@ final class ResultCodec {
      *   <li>{@code Result<Maybe<T>>}：{@code value} 必填，{@code null} 即无值</li>
      *   <li>其余：{@code value} 必填且不是 {@code null}</li>
      * </ul>
-     * 未知成员忽略。
+     * 未知成员忽略；任何一层的重复成员名、孤立的代理项与超过 64 层的嵌套都不合法。数字按值模型读：64 位范围内的整数原样，其余是双精度浮点。
      */
     static final class Deserializer extends StdDeserializer<Result<?>> implements ContextualDeserializer {
         @Serial
@@ -98,7 +99,8 @@ final class ResultCodec {
                 context.readTree(parser);
                 return fail(context, "A result on the wire must be a JSON object.");
             }
-            // 逐个读成员：同一层重复的成员名不合法（ADR-0235）；error 逐层核对，value 的内容交给它自己的类型
+            // 逐个读成员：任何一层的重复成员名都不合法，含 value 与 error 的内部（ADR-0235、ADR-0236）
+            StrictTrees.requireDepth(parser, context, Result.class);
             JsonNode ok = null;
             JsonNode value = null;
             JsonNode error = null;
@@ -106,14 +108,18 @@ final class ResultCodec {
             while (parser.nextToken() == JsonToken.FIELD_NAME) {
                 String name = parser.currentName();
                 parser.nextToken();
+                if (hasLoneSurrogate(name)) {
+                    return fail(context, "A member name of a result contains a lone surrogate.");
+                }
                 if (!seen.add(name)) {
                     return context.reportInputMismatch(Result.class, "The member '%s' appears more than once in a result.", name);
                 }
                 switch (name) {
                     case "ok" -> ok = StrictTrees.read(parser, context, Result.class);
-                    case "value" -> value = context.readTree(parser);
+                    case "value" -> value = StrictTrees.read(parser, context, Result.class);
                     case "error" -> error = StrictTrees.read(parser, context, Result.class);
-                    default -> parser.skipChildren();
+                    // 未知成员忽略，但它的内部同样要合规则
+                    default -> StrictTrees.read(parser, context, Result.class);
                 }
             }
             if (ok == null || !ok.isBoolean()) {
@@ -160,6 +166,10 @@ final class ResultCodec {
         @Override
         public Result<?> getNullValue(DeserializationContext context) throws JsonMappingException {
             return context.reportInputMismatch(Result.class, "%s", "A result on the wire must be a JSON object, not null.");
+        }
+
+        private static boolean hasLoneSurrogate(String name) {
+            return JsonText.encode(name).isEmpty();
         }
 
         private static Result<?> fail(DeserializationContext context, String message) throws IOException {

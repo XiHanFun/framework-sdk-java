@@ -14,8 +14,11 @@ import java.util.TreeMap;
  * JSON 值的校验与不可变复制：{@link Error#details()} 只允许 JSON 可表示的值（RFC-0001）。
  *
  * <p>允许的值：{@code null}、{@link String}、{@link Boolean}、{@link Byte} / {@link Short} / {@link Integer} /
- * {@link Long} / {@link BigInteger}、有限的 {@link Float} / {@link Double}、{@link BigDecimal}、
+ * {@link Long} / {@link BigInteger}、{@link Float} / {@link Double}、{@link BigDecimal}、
  * 元素都合法的 {@link List}、键是字符串且值都合法的 {@link Map}。
+ *
+ * <p>数字按值模型写到线上（RFC-0001「Result」，ADR-0236）：64 位范围内的整数原样，超出 64 位的整数、单精度与十进制小数按双精度浮点；
+ * 整数值的浮点写成带小数点或指数的写法，非有限的浮点写成字符串 {@code NaN}、{@code Infinity}、{@code -Infinity}。
  */
 final class JsonValues {
     private JsonValues() {
@@ -49,12 +52,7 @@ final class JsonValues {
                 || value instanceof BigInteger || value instanceof BigDecimal) {
             return value;
         }
-        if (value instanceof Double number) {
-            requireFinite(path, number);
-            return value;
-        }
-        if (value instanceof Float number) {
-            requireFinite(path, number.doubleValue());
+        if (value instanceof Double || value instanceof Float) {
             return value;
         }
         if (value instanceof List<?> list) {
@@ -76,11 +74,5 @@ final class JsonValues {
         }
         throw new IllegalArgumentException("The detail '" + path + "' of type '" + value.getClass().getName()
                 + "' is not a JSON value; use strings, numbers, booleans, lists, maps or null.");
-    }
-
-    private static void requireFinite(String path, double number) {
-        if (!Double.isFinite(number)) {
-            throw new IllegalArgumentException("The detail '" + path + "' must be a finite number.");
-        }
     }
 }

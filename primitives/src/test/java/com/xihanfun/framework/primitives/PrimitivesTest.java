@@ -183,8 +183,8 @@ class PrimitivesTest {
         assertThrows(UnsupportedOperationException.class, () -> error.details().put("x", 1));
         assertThrows(IllegalArgumentException.class,
                 () -> Error.validation("ORDERS_VALIDATION_001", "orders.invalid", Map.of("when", java.time.Instant.EPOCH)));
-        assertThrows(IllegalArgumentException.class,
-                () -> Error.validation("ORDERS_VALIDATION_001", "orders.invalid", Map.of("n", Double.NaN)));
+        // 非有限的浮点可以放进细节，写到线上是字符串 NaN、Infinity（ADR-0236）
+        assertEquals(Double.NaN, Error.validation("ORDERS_VALIDATION_001", "orders.invalid", Map.of("n", Double.NaN)).details().get("n"));
         assertThrows(IllegalArgumentException.class,
                 () -> Error.validation("ORDERS_VALIDATION_001", "orders.invalid", Map.of("m", Map.of(1, "x"))));
     }
