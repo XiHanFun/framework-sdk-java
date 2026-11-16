@@ -47,6 +47,22 @@ class WireEncodingVectorsTest {
         }
     }
 
+    @Test
+    void duplicateMembersAreRejected() throws IOException {
+        // JSON 值表达不了重复的成员，向量给的是原文；同一层重复即不合法，不取第一个也不取最后一个（ADR-0235）
+        ObjectMapper lenient = new ObjectMapper().registerModule(new PrimitivesModule());
+        for (JsonNode vector : Vectors.read("primitives/wire-encoding.json").get("duplicates")) {
+            String text = vector.get("text").textValue();
+            String name = vector.get("name").textValue();
+            if ("result".equals(vector.get("target").textValue())) {
+                JavaType type = resultType(vector.get("kind").textValue());
+                assertThrows(JsonProcessingException.class, () -> lenient.readValue(text, type), name + " must be rejected");
+            } else {
+                assertThrows(JsonProcessingException.class, () -> lenient.readValue(text, Error.class), name + " must be rejected");
+            }
+        }
+    }
+
     /**
      * 向量的 kind：value 是有值结果（任意非 null 的 JSON），unit 是无值结果，maybe 是值类型为 Maybe 的结果。
      */

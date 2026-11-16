@@ -54,7 +54,7 @@ final class ErrorCodec {
 
     /**
      * 从线上编码还原：{@code code} 必填且合文法，{@code message} 必填且非空；{@code messageKey}、{@code details}、{@code inner}
-     * 缺失表示没有，写成 {@code null} 或类型不对都不合法。未知成员忽略：v1 期间编码只增不改，新成员一律可选。
+     * 缺失表示没有，写成 {@code null} 或类型不对都不合法；同一层重复的成员名不合法。未知成员忽略：v1 期间编码只增不改，新成员一律可选。
      */
     static final class Deserializer extends StdDeserializer<Error> {
         @Serial
@@ -66,7 +66,8 @@ final class ErrorCodec {
 
         @Override
         public Error deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            return fromNode(context.readTree(parser), context);
+            // 逐层核对重复的成员名：错误自身、细节与内部错误（ADR-0235）
+            return fromNode(StrictTrees.read(parser, context, Error.class), context);
         }
 
         static Error fromNode(JsonNode node, DeserializationContext context) throws IOException {

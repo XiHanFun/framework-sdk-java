@@ -2,6 +2,7 @@ package com.xihanfun.framework.primitives.json;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.BeanProperty;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JavaType;
@@ -17,6 +18,8 @@ import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
 import java.io.IOException;
 import java.io.Serial;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * {@link Result} 的线上编码（RFC-0001「Result」，ADR-0233）：
@@ -91,16 +94,31 @@ final class ResultCodec {
 
         @Override
         public Result<?> deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            JsonNode node = context.readTree(parser);
-            if (!node.isObject()) {
+            if (parser.currentToken() != JsonToken.START_OBJECT) {
+                context.readTree(parser);
                 return fail(context, "A result on the wire must be a JSON object.");
             }
-            JsonNode ok = node.get("ok");
+            // 逐个读成员：同一层重复的成员名不合法（ADR-0235）；error 逐层核对，value 的内容交给它自己的类型
+            JsonNode ok = null;
+            JsonNode value = null;
+            JsonNode error = null;
+            Set<String> seen = new HashSet<>();
+            while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                String name = parser.currentName();
+                parser.nextToken();
+                if (!seen.add(name)) {
+                    return context.reportInputMismatch(Result.class, "The member '%s' appears more than once in a result.", name);
+                }
+                switch (name) {
+                    case "ok" -> ok = StrictTrees.read(parser, context, Result.class);
+                    case "value" -> value = context.readTree(parser);
+                    case "error" -> error = StrictTrees.read(parser, context, Result.class);
+                    default -> parser.skipChildren();
+                }
+            }
             if (ok == null || !ok.isBoolean()) {
                 return fail(context, "A result on the wire needs a boolean 'ok'.");
             }
-            JsonNode value = node.get("value");
-            JsonNode error = node.get("error");
             if (!ok.booleanValue()) {
                 if (value != null) {
                     return fail(context, "A failed result on the wire must not carry a 'value'.");
