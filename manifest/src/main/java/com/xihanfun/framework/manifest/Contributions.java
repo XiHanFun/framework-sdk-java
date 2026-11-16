@@ -26,6 +26,21 @@ public final class Contributions {
     /** 健康项名文法。 */
     private static final Pattern HEALTH = Pattern.compile("^[a-z][a-z0-9.-]*$");
 
+    /** 操作 ID 是否合文法（RFC-0011）。 */
+    static boolean isValidOperation(String operation) {
+        return OPERATION.matcher(operation).matches();
+    }
+
+    /** 权限码是否合文法（RFC-0008）。 */
+    static boolean isValidPermissionCode(String code) {
+        return PERMISSION_CODE.matcher(code).matches();
+    }
+
+    /** 健康项名是否合文法。 */
+    static boolean isValidHealth(String item) {
+        return HEALTH.matcher(item).matches();
+    }
+
     /** 什么都没有贡献。 */
     private static final Contributions EMPTY = new Builder().build();
 

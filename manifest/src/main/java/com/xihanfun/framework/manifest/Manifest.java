@@ -1,21 +1,25 @@
 package com.xihanfun.framework.manifest;
 
+import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.ErrorCode;
 import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.Stability;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * 一份清单 {@code xihan.manifest.json}（RFC-0002）：身份、提供与依赖的能力、资源绑定、贡献点、激活事件与权限。
  *
  * <p>不可变、线程安全，只能经 {@link Builder#build()} 或 {@link ManifestJson#read(String)} 得到，二者都校验全部字段与跨字段约束，
- * 所以每个实例都是合法的清单：插件必须声明隔离，非插件不得声明隔离或权限，只有 Wasm 插件可以贡献中间件，提供、依赖与绑定不得重复。
+ * 所以每个实例都是合法的清单：插件必须声明隔离，非插件不得声明隔离或权限，提供、依赖与绑定不得重复。
+ *
+ * <p>只有 Wasm 插件能贡献中间件（RFC-0017），但这由宿主在发现插件时以 {@code PLUGINS_VALIDATION_001} 拒绝，读取与构建清单不核对，与 .NET 的
+ * {@code ManifestReader} 一致（ADR-0236）。
  */
 public final class Manifest {
     /** 清单文件名。 */
@@ -32,6 +36,28 @@ public final class Manifest {
 
     /** 插件权限文法。 */
     private static final Pattern PERMISSION = Pattern.compile("^(net\\.outbound|fs\\.read|fs\\.write|capability):.+$");
+
+    /** 跨字段约束的消息键（与 .NET 的 {@code ManifestMessages} 相同），参数只有 {@code id}。 */
+    static final String ISOLATION_REQUIRED = "primitives.manifest.isolation_required";
+    static final String ISOLATION_NOT_ALLOWED = "primitives.manifest.isolation_not_allowed";
+    static final String DUPLICATE_PROVIDES = "primitives.manifest.duplicate_provides";
+    static final String DUPLICATE_REQUIRES = "primitives.manifest.duplicate_requires";
+    static final String DUPLICATE_BINDINGS = "primitives.manifest.duplicate_bindings";
+
+    /** 版本是否是语义化版本。 */
+    static boolean isValidVersion(String version) {
+        return SEMVER.matcher(version).matches();
+    }
+
+    /** 激活事件是否合文法。 */
+    static boolean isValidActivation(String event) {
+        return ACTIVATION.matcher(event).matches();
+    }
+
+    /** 插件权限是否合文法：{@code .} 不匹配换行，整串匹配。 */
+    static boolean isValidPermission(String permission) {
+        return PERMISSION.matcher(permission).matches();
+    }
 
     private final String schema;
     private final String id;
@@ -304,18 +330,19 @@ public final class Manifest {
     }
 
     /**
-     * 按全部字段比较。
+     * 按生效的值比较，与宿主核对插件握手里的清单一样按字段、不按文本（RFC-0002）：不看 {@code $schema}；没写的角色、激活事件与贡献点
+     * 按缺省（{@code provider}、{@code [onStartup]}、空贡献点）比较，所以写出的清单再读一遍与原来的相等。
      *
      * @param other 另一个对象
      * @return 相等时为真
      */
     @Override
     public boolean equals(Object other) {
-        return other instanceof Manifest that && Objects.equals(schema, that.schema) && id.equals(that.id)
+        return other instanceof Manifest that && id.equals(that.id)
                 && Objects.equals(packageId, that.packageId) && version.equals(that.version) && primitives == that.primitives
-                && stability == that.stability && kind == that.kind && role == that.role && isolation == that.isolation
+                && stability == that.stability && kind == that.kind && effectiveRole() == that.effectiveRole() && isolation == that.isolation
                 && provides.equals(that.provides) && requires.equals(that.requires) && bindings.equals(that.bindings)
-                && Objects.equals(contributes, that.contributes) && activation.equals(that.activation)
+                && effectiveContributions().equals(that.effectiveContributions()) && effectiveActivation().equals(that.effectiveActivation())
                 && permissions.equals(that.permissions) && Objects.equals(entry, that.entry);
     }
 
@@ -326,8 +353,17 @@ public final class Manifest {
      */
     @Override
     public int hashCode() {
-        return Objects.hash(schema, id, packageId, version, primitives, stability, kind, role, isolation, provides, requires, bindings,
-                contributes, activation, permissions, entry);
+        return Objects.hash(id, packageId, version, primitives, stability, kind, effectiveRole(), isolation, provides, requires, bindings,
+                effectiveContributions(), effectiveActivation(), permissions, entry);
+    }
+
+    /**
+     * 返回生效的贡献点：没写时为空的贡献点。
+     *
+     * @return 贡献点
+     */
+    public Contributions effectiveContributions() {
+        return contributes != null ? contributes : Contributions.empty();
     }
 
     /**
@@ -548,7 +584,9 @@ public final class Manifest {
          * 校验格式与跨字段约束并构建清单。
          *
          * @return 清单
-         * @throws FrameworkException 字段缺失或不合法、违反跨字段约束（{@code PRIMITIVES_VALIDATION_001}）
+         * @throws FrameworkException 字段缺失或不合法（{@code PRIMITIVES_VALIDATION_001}）；违反跨字段约束时同一个错误码，
+         *     带 .NET 的消息键与参数 {@code id}：按 {@code primitives.manifest.isolation_required} → {@code isolation_not_allowed} →
+         *     {@code duplicate_provides} → {@code duplicate_requires} → {@code duplicate_bindings} 的顺序报第一个
          */
         public Manifest build() {
             validate();
@@ -571,33 +609,6 @@ public final class Manifest {
             if (kind == null) {
                 throw invalid("The manifest '" + id + "' must declare its kind.");
             }
-            if (kind == ManifestKind.PLUGIN && isolation == null) {
-                throw invalid("The plugin '" + id + "' must declare its isolation.");
-            }
-            if (kind != ManifestKind.PLUGIN && isolation != null) {
-                throw invalid("'" + id + "' is not a plugin and must not declare an isolation.");
-            }
-            if (kind != ManifestKind.PLUGIN && !permissions.isEmpty()) {
-                throw invalid("'" + id + "' is not a plugin and must not declare permissions.");
-            }
-            Set<String> seen = new HashSet<>();
-            for (CapabilityDeclaration declaration : provides) {
-                if (!seen.add(declaration.id())) {
-                    throw invalid("'" + id + "' provides '" + declaration.id() + "' more than once.");
-                }
-            }
-            seen.clear();
-            for (CapabilityRequirement requirement : requires) {
-                if (!seen.add(requirement.id())) {
-                    throw invalid("'" + id + "' requires '" + requirement.id() + "' more than once.");
-                }
-            }
-            seen.clear();
-            for (Binding binding : bindings) {
-                if (!seen.add(binding.name())) {
-                    throw invalid("'" + id + "' declares the binding '" + binding.name() + "' more than once.");
-                }
-            }
             if (activationDeclared && activation.isEmpty()) {
                 throw invalid("The activation of '" + id + "' must list at least one event; leave it out to activate on startup.");
             }
@@ -611,17 +622,35 @@ public final class Manifest {
                     throw invalid("The permission '" + permission + "' of '" + id + "' is not valid.");
                 }
             }
-            // 只有 Wasm 插件能贡献中间件（RFC-0017「范围」）：进程外与进程内插件写了 contributes.pipeline，宿主在发现或加载时以
-            // PLUGINS_VALIDATION_001 拒绝；这里同样拒绝，不让作者以为中间件生效了、等到宿主那里才失败
-            if (kind == ManifestKind.PLUGIN && isolation != PluginIsolation.WASM && contributes != null && !contributes.pipeline().isEmpty()) {
-                String names = contributes.pipeline().stream().map(PipelineContribution::middleware).collect(Collectors.joining(", "));
-                throw invalid("The plugin '" + id + "' with isolation '" + isolation.wireName() + "' must not declare 'contributes.pipeline' ("
-                        + names + "): only wasm plugins can contribute middleware.");
+            // 跨字段约束按 .NET 的 Manifest.Validate 的顺序，消息键与参数相同（RFC-0002 解析规则 2 第 4 步，ADR-0236）
+            if (kind == ManifestKind.PLUGIN && isolation == null) {
+                throw crossField(ISOLATION_REQUIRED);
             }
+            if (kind != ManifestKind.PLUGIN && (isolation != null || !permissions.isEmpty())) {
+                throw crossField(ISOLATION_NOT_ALLOWED);
+            }
+            if (hasDuplicates(provides.stream().map(CapabilityDeclaration::id).toList())) {
+                throw crossField(DUPLICATE_PROVIDES);
+            }
+            if (hasDuplicates(requires.stream().map(CapabilityRequirement::id).toList())) {
+                throw crossField(DUPLICATE_REQUIRES);
+            }
+            if (hasDuplicates(bindings.stream().map(Binding::name).toList())) {
+                throw crossField(DUPLICATE_BINDINGS);
+            }
+        }
+
+        private static boolean hasDuplicates(List<String> values) {
+            Set<String> seen = new HashSet<>();
+            return !values.stream().allMatch(seen::add);
         }
 
         private static FrameworkException invalid(String message) {
             return new FrameworkException(ErrorCode.INVALID_ARGUMENT, message);
+        }
+
+        private FrameworkException crossField(String key) {
+            return new FrameworkException(Error.validation(ErrorCode.INVALID_ARGUMENT, key, Map.of("id", id)));
         }
     }
 }

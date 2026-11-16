@@ -11,6 +11,11 @@ public final class ConfigContribution {
     /** 配置节文法。 */
     private static final Pattern SECTION = Pattern.compile("^XiHan:[A-Z][A-Za-z0-9]*(:[A-Z][A-Za-z0-9]*)*$");
 
+    /** 配置节是否合文法。 */
+    static boolean isValidSection(String section) {
+        return SECTION.matcher(section).matches();
+    }
+
     private final String section;
 
     /** 配置的 JSON Schema 文本；没有为 {@code null}。 */

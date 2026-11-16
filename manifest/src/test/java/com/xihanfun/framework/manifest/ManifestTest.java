@@ -12,6 +12,7 @@ import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.PipelineStage;
 import com.xihanfun.framework.primitives.Stability;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -21,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * 清单的读取、规范化输出与校验：逐项移植自 Go SDK 的 manifest_test.go，规范化输出与 Go SDK 写出的逐字节比较。
+ * 清单的读取、写出与校验：读取的错误与写出的排版按 RFC-0002（ADR-0236），与 .NET 的 ManifestReader 相同；逐字的期望另见 ManifestVectorsTest。
  */
 class ManifestTest {
     private static final String ECHO_MANIFEST = """
@@ -45,14 +46,86 @@ class ManifestTest {
               "entry": "EchoPlugin"
             }""";
 
-    /** Go SDK 的 manifest.Write 对 ECHO_MANIFEST 的输出。 */
-    private static final String ECHO_WRITTEN_BY_GO = "{\n  \"$schema\": \"https://spec.xihanfun.com/manifest/v1.json\",\n  \"id\": \"xihan.samples.echo\",\n  \"package\": \"EchoPlugin\",\n  \"version\": \"5.0.0-preview.1\",\n  \"primitives\": \"1\",\n  \"stability\": \"experimental\",\n  \"kind\": \"plugin\",\n  \"isolation\": \"out-of-process\",\n  \"requires\": [\n    {\n      \"id\": \"kernel.plugins\",\n      \"version\": \"1\"\n    }\n  ],\n  \"contributes\": {\n    \"operations\": [\n      \"echoes.create\",\n      \"echoes.relay\",\n      \"echoes.crash\",\n      \"events.list\"\n    ],\n    \"config\": {\n      \"section\": \"XiHan:Echo\"\n    },\n    \"health\": [\n      \"echo\"\n    ]\n  },\n  \"activation\": [\n    \"onStartup\"\n  ],\n  \"permissions\": [\n    \"capability:kernel.pipeline\"\n  ],\n  \"entry\": \"EchoPlugin\"\n}";
-
     /** 覆盖全部字段与字符串转义的清单。 */
-    private static final String FULL_MANIFEST = "{\"id\":\"xihan.caching.redis\",\"package\":\"A<b>&c \\\"q\\\" \\\\ \\u2028 tab\\t\",\"version\":\"1.2.3+build.5\",\"primitives\":\"1\",\"stability\":\"preview\",\"kind\":\"provider\",\"role\":\"default\",\"provides\":[{\"id\":\"caching.distributed\",\"version\":\"2\"},{\"id\":\"caching.local\",\"version\":\"1\"}],\"requires\":[{\"id\":\"kernel.hosting\",\"version\":\"^1\"},{\"id\":\"multitenancy.context\",\"version\":\"1\",\"optional\":true}],\"bindings\":[{\"name\":\"cache\",\"type\":\"cache:distributed\"},{\"name\":\"db\",\"type\":\"connection:relational\",\"required\":false}],\"contributes\":{\"pipeline\":[{\"middleware\":\"audit\",\"stage\":\"observe\",\"before\":[\"x\"],\"after\":[\"y\",\"z\"]}],\"config\":{\"section\":\"XiHan:Caching:Redis\",\"schema\":\"{}\"},\"permissions\":[\"caching.read\"],\"health\":[\"caching.redis.connection\"]},\"activation\":[\"onOperation:cache-entries.*\"],\"entry\":\"X\"}";
+    private static final String FULL_MANIFEST = "{\"id\":\"xihan.caching.redis\",\"package\":\"A<b>&c \\\"q\\\" \\\\ \u2028 tab\\t\",\"version\":\"1.2.3+build.5\",\"primitives\":\"1\",\"stability\":\"preview\",\"kind\":\"provider\",\"role\":\"default\",\"provides\":[{\"id\":\"caching.distributed\",\"version\":\"2\"},{\"id\":\"caching.local\",\"version\":\"1\"}],\"requires\":[{\"id\":\"kernel.hosting\",\"version\":\"^1\"},{\"id\":\"multitenancy.context\",\"version\":\"1\",\"optional\":true}],\"bindings\":[{\"name\":\"cache\",\"type\":\"cache:distributed\"},{\"name\":\"db\",\"type\":\"connection:relational\",\"required\":false}],\"contributes\":{\"pipeline\":[{\"middleware\":\"audit\",\"stage\":\"observe\",\"before\":[\"x\"],\"after\":[\"y\",\"z\"]}],\"config\":{\"section\":\"XiHan:Caching:Redis\",\"schema\":\"{}\"},\"permissions\":[\"caching.read\"],\"health\":[\"caching.redis.connection\"]},\"activation\":[\"onOperation:cache-entries.*\"],\"entry\":\"X\"}";
 
-    /** Go SDK 的 manifest.Write 对 FULL_MANIFEST 的输出。 */
-    private static final String FULL_WRITTEN_BY_GO = "{\n  \"id\": \"xihan.caching.redis\",\n  \"package\": \"A\\u003cb\\u003e\\u0026c \\\"q\\\" \\\\ \\u2028 tab\\t\",\n  \"version\": \"1.2.3+build.5\",\n  \"primitives\": \"1\",\n  \"stability\": \"preview\",\n  \"kind\": \"provider\",\n  \"role\": \"default\",\n  \"provides\": [\n    {\n      \"id\": \"caching.distributed\",\n      \"version\": \"2\"\n    },\n    {\n      \"id\": \"caching.local\",\n      \"version\": \"1\"\n    }\n  ],\n  \"requires\": [\n    {\n      \"id\": \"kernel.hosting\",\n      \"version\": \"1\"\n    },\n    {\n      \"id\": \"multitenancy.context\",\n      \"version\": \"1\",\n      \"optional\": true\n    }\n  ],\n  \"bindings\": [\n    {\n      \"name\": \"cache\",\n      \"type\": \"cache:distributed\"\n    },\n    {\n      \"name\": \"db\",\n      \"type\": \"connection:relational\",\n      \"required\": false\n    }\n  ],\n  \"contributes\": {\n    \"pipeline\": [\n      {\n        \"middleware\": \"audit\",\n        \"stage\": \"observe\",\n        \"before\": [\n          \"x\"\n        ],\n        \"after\": [\n          \"y\",\n          \"z\"\n        ]\n      }\n    ],\n    \"config\": {\n      \"section\": \"XiHan:Caching:Redis\",\n      \"schema\": \"{}\"\n    },\n    \"permissions\": [\n      \"caching.read\"\n    ],\n    \"health\": [\n      \"caching.redis.connection\"\n    ]\n  },\n  \"activation\": [\n    \"onOperation:cache-entries.*\"\n  ],\n  \"entry\": \"X\"\n}";
+    /** FULL_MANIFEST 按 RFC-0002「写出」的排版：列表总写，缺省值写出，字符串只转义必须转义的字符（U+2028 与 {@code <>&} 原样；文本块里写不进 U+2028，用 {@code <LS>} 代替）。 */
+    private static final String FULL_WRITTEN = """
+            {
+              "$schema": "https://spec.xihanfun.com/manifest/v1.json",
+              "id": "xihan.caching.redis",
+              "package": "A<b>&c \\"q\\" \\\\ <LS> tab\\t",
+              "version": "1.2.3+build.5",
+              "primitives": "1",
+              "stability": "preview",
+              "kind": "provider",
+              "role": "default",
+              "provides": [
+                {
+                  "id": "caching.distributed",
+                  "version": "2"
+                },
+                {
+                  "id": "caching.local",
+                  "version": "1"
+                }
+              ],
+              "requires": [
+                {
+                  "id": "kernel.hosting",
+                  "version": "1",
+                  "optional": false
+                },
+                {
+                  "id": "multitenancy.context",
+                  "version": "1",
+                  "optional": true
+                }
+              ],
+              "bindings": [
+                {
+                  "name": "cache",
+                  "type": "cache:distributed",
+                  "required": true
+                },
+                {
+                  "name": "db",
+                  "type": "connection:relational",
+                  "required": false
+                }
+              ],
+              "contributes": {
+                "pipeline": [
+                  {
+                    "middleware": "audit",
+                    "stage": "observe",
+                    "before": [
+                      "x"
+                    ],
+                    "after": [
+                      "y",
+                      "z"
+                    ]
+                  }
+                ],
+                "operations": [],
+                "config": {
+                  "section": "XiHan:Caching:Redis",
+                  "schema": "{}"
+                },
+                "permissions": [
+                  "caching.read"
+                ],
+                "health": [
+                  "caching.redis.connection"
+                ]
+              },
+              "activation": [
+                "onOperation:cache-entries.*"
+              ],
+              "permissions": [],
+              "entry": "X"
+            }""".replace("<LS>", "\u2028");
 
     @Test
     void readParsesAPluginManifest() {
@@ -73,7 +146,6 @@ class ManifestTest {
         assertEquals("caching", CapabilityId.domainOf("caching.distributed"));
 
         String written = ManifestJson.write(manifest);
-        assertEquals(ECHO_WRITTEN_BY_GO, written, "the canonical output is byte-identical to the Go SDK");
         Manifest again = ManifestJson.read(written);
         assertEquals(manifest, again, "round trip");
         assertTrue(written.contains("\"primitives\": \"1\""));
@@ -83,16 +155,18 @@ class ManifestTest {
     @Test
     void canonicalOutputMatchesGoForEveryField() {
         Manifest manifest = ManifestJson.read(FULL_MANIFEST);
-        assertEquals(FULL_WRITTEN_BY_GO, ManifestJson.write(manifest));
+        assertEquals(FULL_WRITTEN, ManifestJson.write(manifest));
         assertEquals(manifest, ManifestJson.read(ManifestJson.write(manifest)));
         assertEquals(Optional.of(false), manifest.bindings().get(1).required());
         assertFalse(manifest.bindings().get(1).isRequired());
         assertTrue(manifest.bindings().get(0).isRequired());
         assertEquals(List.of("onOperation:cache-entries.*"), manifest.effectiveActivation());
         assertFalse(manifest.activatesOnStartup());
-        String empty = "{\"id\":\"xihan.a.b\",\"version\":\"1.0.0\",\"primitives\":\"1\",\"stability\":\"stable\",\"kind\":\"capability\",\"contributes\":{}}";
-        assertEquals("{\n  \"id\": \"xihan.a.b\",\n  \"version\": \"1.0.0\",\n  \"primitives\": \"1\",\n  \"stability\": \"stable\",\n  \"kind\": \"capability\",\n  \"contributes\": {}\n}",
-                ManifestJson.write(ManifestJson.read(empty)), "present but empty contributions are written as {}");
+        String minimal = "{\"id\":\"xihan.a.b\",\"version\":\"1.0.0\",\"primitives\":\"1\",\"stability\":\"stable\",\"kind\":\"capability\"";
+        assertEquals(ManifestJson.write(ManifestJson.read(minimal + "}")), ManifestJson.write(ManifestJson.read(minimal + ",\"contributes\":{}}")),
+                "empty and missing contributions are written the same");
+        assertEquals(ManifestJson.read(minimal + "}"), ManifestJson.read(minimal + ",\"role\":\"provider\",\"activation\":[\"onStartup\"]}"),
+                "defaults compare equal to the written defaults");
     }
 
     @Test
@@ -192,31 +266,28 @@ class ManifestTest {
     }
 
     @Test
-    void onlyWasmPluginsMayContributeMiddleware() {
+    void middlewareOfNonWasmPluginsIsLeftToTheHost() {
+        // 只有 Wasm 插件能贡献中间件，但由宿主在发现插件时拒绝（PLUGINS_VALIDATION_001）；读取与构建清单不核对，与 .NET 一致（ADR-0236）
         String template = "{\"id\":\"xihan.a.b\",\"version\":\"1.0.0\",\"primitives\":\"1\",\"stability\":\"stable\",\"kind\":\"%s\"%s,\"contributes\":{\"pipeline\":%s}}";
         String audit = "[{\"middleware\":\"audit\",\"stage\":\"observe\"},{\"middleware\":\"tenant-guard\",\"stage\":\"tenant\"}]";
-        for (PluginIsolation isolation : List.of(PluginIsolation.OUT_OF_PROCESS, PluginIsolation.IN_PROCESS)) {
-            String json = template.formatted("plugin", ",\"isolation\":\"" + isolation.wireName() + "\"", audit);
-            FrameworkException rejected = assertThrows(FrameworkException.class, () -> ManifestJson.read(json));
-            assertEquals(ErrorCode.INVALID_ARGUMENT, rejected.code());
-            for (String fragment : List.of("'xihan.a.b'", "'contributes.pipeline'", "audit, tenant-guard", isolation.wireName())) {
-                assertTrue(rejected.getMessage().contains(fragment), "the message must mention " + fragment + ": " + rejected.getMessage());
-            }
-        }
         Map<String, String> accepted = Map.of(
                 "wasm plugin", template.formatted("plugin", ",\"isolation\":\"wasm\"", audit),
-                "capability", template.formatted("capability", "", audit),
-                "provider", template.formatted("provider", "", audit),
-                "out-of-process, empty list", template.formatted("plugin", ",\"isolation\":\"out-of-process\"", "[]"),
-                "in-process, empty list", template.formatted("plugin", ",\"isolation\":\"in-process\"", "[]"));
+                "out-of-process plugin", template.formatted("plugin", ",\"isolation\":\"out-of-process\"", audit),
+                "in-process plugin", template.formatted("plugin", ",\"isolation\":\"in-process\"", audit),
+                "capability", template.formatted("capability", "", audit));
         accepted.forEach((name, json) -> assertDoesNotThrow(() -> ManifestJson.read(json), name));
+    }
 
-        // 构建同样核对：不产生宿主会拒绝的清单
-        Manifest.Builder builder = Manifest.builder().id("xihan.a.b").version("1.0.0").primitives(1).stability(Stability.STABLE)
-                .kind(ManifestKind.PLUGIN).isolation(PluginIsolation.OUT_OF_PROCESS)
-                .contributes(Contributions.builder().pipeline(List.of(PipelineContribution.of("audit", PipelineStage.OBSERVE))).build());
-        FrameworkException rejected = assertThrows(FrameworkException.class, builder::build);
+    @Test
+    void crossFieldConstraintsCarryTheDotNetKeys() {
+        // 构建时的跨字段约束：PRIMITIVES_VALIDATION_001 加 .NET 的消息键与参数 id；读取时换成 KERNEL_CAPABILITY_006
+        Manifest.Builder plugin = Manifest.builder().id("xihan.a.b").version("1.0.0").primitives(1).stability(Stability.STABLE)
+                .kind(ManifestKind.PLUGIN);
+        FrameworkException rejected = assertThrows(FrameworkException.class, plugin::build);
         assertEquals(ErrorCode.INVALID_ARGUMENT, rejected.code());
+        assertEquals(Optional.of("primitives.manifest.isolation_required"), rejected.toError().messageKey());
+        assertEquals(Map.of("id", "xihan.a.b"), rejected.toError().details());
+        assertEquals("Plugin manifest 'xihan.a.b' must declare 'isolation'.", rejected.getMessage());
     }
 
     @Test
@@ -242,11 +313,34 @@ class ManifestTest {
         Path file = directory.resolve(Manifest.FILE_NAME);
         Files.writeString(file, ECHO_MANIFEST);
         assertEquals("xihan.samples.echo", ManifestJson.readFile(file).id());
-        assertThrows(IOException.class, () -> ManifestJson.readFile(directory.resolve("missing.json")));
+
+        // ReadFile 跳过开头的 UTF-8 BOM；Read 不跳过（RFC-0002 解析规则 2 第 1 步）
+        byte[] text = ECHO_MANIFEST.getBytes(StandardCharsets.UTF_8);
+        byte[] withBom = new byte[text.length + 3];
+        withBom[0] = (byte) 0xEF;
+        withBom[1] = (byte) 0xBB;
+        withBom[2] = (byte) 0xBF;
+        System.arraycopy(text, 0, withBom, 3, text.length);
+        Files.write(file, withBom);
+        assertEquals("xihan.samples.echo", ManifestJson.readFile(file).id());
+        FrameworkException bom = assertThrows(FrameworkException.class, () -> ManifestJson.read(withBom));
+        assertEquals(Optional.of(ManifestJson.INVALID_JSON), bom.toError().messageKey());
+        assertEquals(Map.of("reason", "$"), bom.toError().details());
+
+        Files.write(file, new byte[] {'{', '"', 'i', 'd', '"', ':', '"', (byte) 0xFF, '"', '}'});
+        assertEquals(Optional.of(ManifestJson.INVALID_JSON), assertThrows(FrameworkException.class, () -> ManifestJson.readFile(file))
+                .toError().messageKey(), "a file that is not UTF-8 is not JSON");
+
+        for (Path missing : List.of(directory.resolve("missing.json"), directory)) {
+            FrameworkException rejected = assertThrows(FrameworkException.class, () -> ManifestJson.readFile(missing));
+            assertEquals(ManifestJson.INVALID_MANIFEST, rejected.code());
+            assertEquals(Optional.of(ManifestJson.FILE_MISSING), rejected.toError().messageKey());
+            assertEquals(Map.of("path", missing.toString()), rejected.toError().details());
+        }
     }
 
     private static void assertRejected(String json, String name) {
         FrameworkException rejected = assertThrows(FrameworkException.class, () -> ManifestJson.read(json), name + " must be rejected");
-        assertEquals(ErrorCode.INVALID_ARGUMENT, rejected.code(), name);
+        assertEquals(ManifestJson.INVALID_MANIFEST, rejected.code(), name);
     }
 }

@@ -16,6 +16,16 @@ public final class Binding {
     /** 资源类型文法：{@code <类别>[:<子类>]}。 */
     private static final Pattern TYPE = Pattern.compile("^[a-z]+(:[a-z]+)?$");
 
+    /** 绑定名是否合文法（清单读取按 Schema 核对时用）。 */
+    static boolean isValidName(String name) {
+        return NAME.matcher(name).matches();
+    }
+
+    /** 绑定类型是否合文法。 */
+    static boolean isValidType(String type) {
+        return TYPE.matcher(type).matches();
+    }
+
     private final String name;
     private final String type;
 
@@ -95,14 +105,14 @@ public final class Binding {
     }
 
     /**
-     * 按名字、类型与写明的必需标记比较。
+     * 按名字、类型与生效的必需标记比较：没写与写 {@code true} 相同，写出的清单再读一遍与原来的相等。
      *
      * @param other 另一个对象
      * @return 相等时为真
      */
     @Override
     public boolean equals(Object other) {
-        return other instanceof Binding that && name.equals(that.name) && type.equals(that.type) && Objects.equals(required, that.required);
+        return other instanceof Binding that && name.equals(that.name) && type.equals(that.type) && isRequired() == that.isRequired();
     }
 
     /**
@@ -112,7 +122,7 @@ public final class Binding {
      */
     @Override
     public int hashCode() {
-        return Objects.hash(name, type, required);
+        return Objects.hash(name, type, isRequired());
     }
 
     /**

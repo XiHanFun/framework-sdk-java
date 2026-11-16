@@ -23,7 +23,11 @@ class KernelMessagesVectorsTest {
     @Test
     void defaultTemplatesFollowTheVectors() throws IOException {
         JsonNode messages = Vectors.read("primitives/kernel-messages.json").get("messages");
-        assertEquals(messages.size(), KernelMessages.templates().size(), "the SDK carries exactly the shared kernel messages");
+        // 内置模板 = 共用的内核消息 + 清单读取的错误（kernel.manifest.*、primitives.manifest.*，RFC-0002 解析规则 2）
+        long manifestMessages = KernelMessages.templates().keySet().stream()
+                .filter(key -> key.startsWith("kernel.manifest.") || key.startsWith("primitives.manifest.")).count();
+        assertEquals(9, manifestMessages);
+        assertEquals(messages.size() + manifestMessages, KernelMessages.templates().size(), "the SDK carries exactly the shared kernel messages");
         for (JsonNode message : messages) {
             String code = message.get("code").textValue();
             String key = message.get("key").textValue();
