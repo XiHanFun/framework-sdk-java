@@ -242,15 +242,15 @@ class OperationInvokerTest {
     }
 
     @Test
-    void egressMiddlewareSeesTheResponsePayload() {
-        AtomicReference<String> written = new AtomicReference<>();
+    void egressMiddlewareSeesTheResponseBeforeItIsEncoded() {
+        AtomicReference<Object> written = new AtomicReference<>();
         PipelineBuilder pipeline = new PipelineBuilder().useAt(Middleware.of("Egress", (context, next) -> {
             Result<Unit> outcome = next.invoke(context);
-            Operations.findResponsePayload(context).ifPresent(payload -> written.set(new String(payload, StandardCharsets.UTF_8)));
+            Operations.findResponse(context).ifPresent(written::set);
             return outcome;
         }), PipelineStage.EGRESS, Placement.END, "app");
         newInvoker(pipeline).invoke(correlated("c4"), OperationRequest.of("orders.create", "{\"quantity\":4}"));
-        assertEquals("{\"id\":\"o-c4\",\"quantity\":4}", written.get());
+        assertEquals(new OrderCreated("o-c4", 4), written.get(), "the response object; it is encoded after the pipeline (ADR-0236)");
     }
 
     @Test

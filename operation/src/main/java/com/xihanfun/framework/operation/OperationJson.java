@@ -1,6 +1,8 @@
 package com.xihanfun.framework.operation;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.core.json.JsonWriteFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonMappingException;
@@ -9,12 +11,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.cfg.CoercionAction;
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.DecimalNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.type.LogicalType;
+import com.xihanfun.framework.invocation.InvocationErrors;
 import com.xihanfun.framework.primitives.Error;
+import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.JsonText;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.json.PrimitivesModule;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +34,11 @@ import java.util.Optional;
 public final class OperationJson {
     /** 读载荷的树：文本已过共同检查；ObjectNode 按文档顺序保留成员，整数与浮点的写法分得开（{@code 1} 与 {@code 1.0}）。 */
     private static final ObjectMapper TREES = JsonMapper.builder().build();
+
+    private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+    /** 未处理的异常写到这里，与 Observe 阶段的内置步骤同一个日志。 */
+    private static final System.Logger LOGGER = System.getLogger(OperationInvoker.class.getName());
 
     /** 空载荷等价于 {@code {}}。 */
     private static final byte[] EMPTY_OBJECT = "{}".getBytes(StandardCharsets.US_ASCII);
@@ -75,12 +89,7 @@ public final class OperationJson {
         if (problem.isPresent()) {
             return Result.fail(invalidPayload(id, problem.get().path()));
         }
-        JsonNode tree;
-        try {
-            tree = TREES.readTree(text);
-        } catch (IOException impossible) {
-            throw new IllegalStateException("The payload passed the JSON text check but Jackson could not read it.", impossible);
-        }
+        JsonNode tree = readTree(text);
         if (tree.isNull()) {
             return Result.fail(invalidPayload(id, JsonText.ROOT));
         }
@@ -104,14 +113,101 @@ public final class OperationJson {
     }
 
     /**
-     * 编码响应；编码失败是操作实现的缺陷，以 {@code KERNEL_UNEXPECTED_001} 结束调用。
+     * 读已过共同检查的载荷：整数按 Jackson 的缺省（64 位以内是 int / long，超出是精确的 BigInteger）；浮点在双精度能表示时是 double，
+     * 保留 {@code 2.0} 与 {@code -0.0}，上溢（{@code 1e400}）或把非零的数下溢成 0（{@code 1e-400}）时保留原文的精确十进制，
+     * 所以任意 JSON 类型的成员写回时与读到的 JSON 值相等（RFC-0011 规则 2，ADR-0236）。按声明为浮点的成员解码时，精确十进制照常换成
+     * 无穷或 0。
+     */
+    static JsonNode readTree(byte[] text) {
+        try (JsonParser parser = TREES.createParser(text)) {
+            parser.nextToken();
+            return node(parser);
+        } catch (IOException impossible) {
+            throw new IllegalStateException("The payload passed the JSON text check but Jackson could not read it.", impossible);
+        }
+    }
+
+    private static JsonNode node(JsonParser parser) throws IOException {
+        switch (parser.currentToken()) {
+            case START_OBJECT -> {
+                ObjectNode object = NODES.objectNode();
+                while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                    String name = parser.currentName();
+                    parser.nextToken();
+                    object.set(name, node(parser));
+                }
+                return object;
+            }
+            case START_ARRAY -> {
+                ArrayNode array = NODES.arrayNode();
+                while (parser.nextToken() != JsonToken.END_ARRAY) {
+                    array.add(node(parser));
+                }
+                return array;
+            }
+            case VALUE_STRING -> {
+                return NODES.textNode(parser.getText());
+            }
+            case VALUE_NUMBER_INT -> {
+                return switch (parser.getNumberType()) {
+                    case INT -> NODES.numberNode(parser.getIntValue());
+                    case LONG -> NODES.numberNode(parser.getLongValue());
+                    default -> NODES.numberNode(parser.getBigIntegerValue());
+                };
+            }
+            case VALUE_NUMBER_FLOAT -> {
+                double number = parser.getDoubleValue();
+                if (Double.isInfinite(number) || (number == 0 && new BigDecimal(parser.getText()).signum() != 0)) {
+                    return DecimalNode.valueOf(new BigDecimal(parser.getText()));
+                }
+                return NODES.numberNode(number);
+            }
+            case VALUE_TRUE -> {
+                return NODES.booleanNode(true);
+            }
+            case VALUE_FALSE -> {
+                return NODES.booleanNode(false);
+            }
+            default -> {
+                return NODES.nullNode();
+            }
+        }
+    }
+
+    /**
+     * 编码响应（RFC-0011 规则 10「编码」，ADR-0236）：在管道结束之后才编码，写不出时（类型化的浮点成员是 NaN 或无穷、序列化不支持的值）
+     * 以 {@code KERNEL_UNEXPECTED_001} + {@code kernel.invocation.unhandled_exception} 结束，异常是框架异常时它的错误放进 {@code inner}，
+     * 不抛给调用方。NaN 与无穷不写成字符串：编码时关掉 {@code WRITE_NAN_AS_STRINGS}，写出的文本再过共同的 JSON 文本检查，
+     * Jackson 写出的 {@code NaN} 这类非 JSON 写法因此失败。
      */
     static Result<byte[]> encode(ObjectMapper mapper, String id, Object value) {
+        byte[] payload;
         try {
-            return Result.ok(mapper.writeValueAsBytes(value));
-        } catch (JsonProcessingException failure) {
-            return Result.fail(Error.literal(OperationErrors.UNEXPECTED, "The response of '" + id + "' could not be encoded: " + failure.getOriginalMessage()));
+            payload = mapper.writer().without(JsonWriteFeature.WRITE_NAN_AS_STRINGS).writeValueAsBytes(value);
+        } catch (IOException | RuntimeException failure) {
+            LOGGER.log(System.Logger.Level.ERROR, "The response of the operation '" + id + "' could not be encoded.", failure);
+            Optional<FrameworkException> framework = frameworkCause(failure);
+            return Result.fail(framework.map(cause -> InvocationErrors.unhandledException(cause.toError()))
+                    .orElseGet(InvocationErrors::unhandledException));
         }
+        if (JsonText.check(payload).isPresent()) {
+            LOGGER.log(System.Logger.Level.ERROR, "The response of the operation '" + id + "' is not JSON (NaN, an infinity or a lone surrogate).");
+            return Result.fail(InvocationErrors.unhandledException());
+        }
+        return Result.ok(payload);
+    }
+
+    /**
+     * 沿原因链找框架异常：Jackson 把序列化器抛出的异常包在 JsonMappingException 里。链长有上限，成环的原因链不会死循环。
+     */
+    private static Optional<FrameworkException> frameworkCause(Throwable thrown) {
+        Throwable current = thrown;
+        for (int depth = 0; current != null && depth < 16; depth++, current = current.getCause()) {
+            if (current instanceof FrameworkException framework) {
+                return Optional.of(framework);
+            }
+        }
+        return Optional.empty();
     }
 
     static Error invalidPayload(String id, String reason) {

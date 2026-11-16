@@ -71,7 +71,8 @@ public final class OperationInvoker {
 
     /**
      * 执行一个 XGI 请求：未登记返回 {@code KERNEL_NOTFOUND_001}（不进管道）；否则经完整管道执行，载荷在 Validate 阶段解码，
-     * 不合法为 {@code KERNEL_VALIDATION_001}，成功时带响应类型的 JSON。
+     * 不合法为 {@code KERNEL_VALIDATION_001}。管道成功结束之后才把响应编码成载荷，写不出（类型化的浮点成员是 NaN 或无穷、
+     * 序列化不支持的值）时为 {@code KERNEL_UNEXPECTED_001} + {@code kernel.invocation.unhandled_exception}，没有载荷。
      *
      * @param context 调用上下文
      * @param request XGI 请求
@@ -89,12 +90,12 @@ public final class OperationInvoker {
         if (outcome.isFailed()) {
             return OperationResponse.failed(outcome.error().orElseThrow());
         }
-        byte[] payload = scope.responsePayload;
-        if (payload == null) {
+        if (!scope.responded) {
             // 管道成功结束却没有执行到终点：有中间件没调下游就返回了成功，成功的 XGI 响应必须带载荷
             return OperationResponse.failed(noResponse(request.id()));
         }
-        return OperationResponse.owning(payload);
+        // 管道结束之后才编码：中间件看到的是编码之前的结果；写不出时以 unhandled_exception 结束，不抛给调用方（RFC-0011 规则 10「编码」）
+        return scope.descriptor.encode(scope.response).match(OperationResponse::owning, OperationResponse::failed);
     }
 
     /**

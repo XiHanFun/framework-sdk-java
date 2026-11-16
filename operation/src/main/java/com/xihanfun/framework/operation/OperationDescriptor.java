@@ -88,10 +88,17 @@ public final class OperationDescriptor {
     }
 
     /**
-     * 以已解码的请求执行，编码响应。
+     * 以已解码的请求执行；响应在管道结束之后由 {@link #encode(Object)} 编码。
      */
-    OperationResponse executeDecoded(Context context, Object request) {
+    Result<?> executeDecoded(Context context, Object request) {
         return executor.executeDecoded(context, request);
+    }
+
+    /**
+     * 把响应对象编码成载荷；写不出时为 {@code kernel.invocation.unhandled_exception}。
+     */
+    Result<byte[]> encode(Object response) {
+        return executor.encode(response);
     }
 
     /**
@@ -118,13 +125,12 @@ public final class OperationDescriptor {
             return OperationJson.decode(mapper, shape, id, payload, requestType);
         }
 
-        OperationResponse executeDecoded(Context context, Object request) {
-            Result<Res> result = handle(context, requestType.cast(request));
-            if (result.isFailed()) {
-                return OperationResponse.failed(result.error().orElseThrow());
-            }
-            Result<byte[]> encoded = OperationJson.encode(mapper, id, result.value().orElseThrow());
-            return encoded.match(OperationResponse::owning, OperationResponse::failed);
+        Result<Res> executeDecoded(Context context, Object request) {
+            return handle(context, requestType.cast(request));
+        }
+
+        Result<byte[]> encode(Object response) {
+            return OperationJson.encode(mapper, id, response);
         }
 
         Result<Res> executeTyped(Context context, Object request) {

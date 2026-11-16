@@ -25,8 +25,11 @@ final class InvocationScope {
     /** Validate 阶段解码出的请求对象；原始调用在这里，类型化调用为 {@code null}。 */
     volatile Object decodedRequest;
 
-    /** handle 阶段写回的响应载荷；终点与中间件可能不在同一线程，所以是 volatile。 */
-    volatile byte[] responsePayload;
+    /** 原始调用执行成功时的响应对象，管道结束之后才编码（RFC-0011 规则 10「编码」）；终点与中间件可能不在同一线程，所以是 volatile。 */
+    volatile Object response;
+
+    /** 原始调用的处理器是否执行成功、写回了响应。 */
+    volatile boolean responded;
 
     /** 类型化调用的结果。 */
     volatile Result<?> typedResult;
@@ -60,10 +63,11 @@ final class InvocationScope {
             }
             request = decoded.value().orElseThrow();
         }
-        OperationResponse response = scope.descriptor.executeDecoded(context, request);
-        if (response.isOk()) {
-            scope.responsePayload = response.payloadView();
+        Result<?> result = scope.descriptor.executeDecoded(context, request);
+        if (result.isOk()) {
+            scope.response = result.value().orElseThrow();
+            scope.responded = true;
         }
-        return response.outcome();
+        return result.toUnit();
     }
 }
