@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
+import com.xihanfun.framework.primitives.MessageTemplate;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
@@ -33,6 +34,10 @@ class ManifestVectorsTest {
 
     @Test
     void invalidManifestsReportTheExpectedError() throws IOException {
+        Map<String, String> templates = new java.util.HashMap<>();
+        for (JsonNode message : Vectors.read("primitives/kernel-messages.json").get("messages")) {
+            templates.put(message.get("key").textValue(), message.get("template").textValue());
+        }
         for (JsonNode vector : Vectors.read("manifest/manifests.json").get("invalid")) {
             String name = vector.get("name").textValue();
             JsonNode expected = vector.get("error");
@@ -42,6 +47,8 @@ class ManifestVectorsTest {
             assertEquals(Optional.of(expected.get("messageKey").textValue()), error.messageKey(), name);
             Map<String, Object> arguments = MAPPER.convertValue(expected.get("arguments"), new TypeReference<>() { });
             assertEquals(arguments, error.details(), name);
+            // message 是 kernel-messages 里的英文模板格式化后的句子，与 .NET 相同（ADR-0236）
+            assertEquals(MessageTemplate.format(templates.get(error.messageKey().get()), arguments), error.message(), name + " message");
         }
     }
 

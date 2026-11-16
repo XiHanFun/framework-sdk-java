@@ -6,7 +6,8 @@ import java.util.Map;
  * SDK 与宿主共用的内核消息的默认英文模板（RFC-0011「错误码」，ADR-0233）。
  *
  * <p>错误码、消息键、参数名与 en-US 模板逐字取自向量 {@code conformance/vectors/primitives/kernel-messages.json}（模板以 .NET 的
- * {@code Localization/en-US.json} 为准）；另带清单读取错误的模板（{@code kernel.manifest.*}、{@code primitives.manifest.*}）。{@link MessageScope#resolve(String, Map)} 在进程默认的解析器翻译不出这些键时用它们，
+ * {@code Localization/en-US.json} 为准），含清单读取的错误（{@code kernel.manifest.*}、{@code primitives.manifest.*}，ADR-0236）。
+ * {@link MessageScope#resolve(String, Map)} 在进程默认的解析器翻译不出这些键时用它们，
  * 所以 {@link Error#message()} 与线上的 {@code message} 是可读的英文；宿主收到后仍按键用自己的目录再翻译。
  */
 public final class KernelMessages {
@@ -29,7 +30,7 @@ public final class KernelMessages {
             Map.entry("kernel.operation.no_response", "Operation '{id}' completed without producing a response."),
             Map.entry("kernel.operation.duplicate", "Operation '{id}' is already registered by '{owner}'."),
             Map.entry("kernel.operation.registry_full", "The operation registry has reached its capacity of {capacity}."),
-            // 清单读取的错误（RFC-0002 解析规则 2，ADR-0236）：模板取自 .NET 内核与原语的 Localization/en-US.json
+            // 清单读取的错误（RFC-0002 解析规则 2，ADR-0236）：读取失败时错误码都是 KERNEL_CAPABILITY_006
             Map.entry("kernel.manifest.empty", "The manifest is empty."),
             Map.entry("kernel.manifest.file_missing", "Manifest file '{path}' does not exist."),
             Map.entry("kernel.manifest.invalid", "The manifest is not valid: {reason}"),
