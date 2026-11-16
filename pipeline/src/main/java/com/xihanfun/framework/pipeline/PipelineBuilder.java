@@ -5,14 +5,13 @@ import com.xihanfun.framework.primitives.PipelineStage;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 /**
  * 收集中间件与顺序约束，按 RFC-0004 的排序规则排序后构建管道。
@@ -77,7 +76,7 @@ public final class PipelineBuilder {
     public static PipelineStage parseStage(String name) {
         Objects.requireNonNull(name, "name");
         return PipelineStage.parse(name)
-                .orElseThrow(() -> new FrameworkException(PipelineErrors.UNKNOWN_STAGE, "'" + name + "' is not a pipeline stage."));
+                .orElseThrow(() -> new FrameworkException(PipelineErrors.UNKNOWN_STAGE, "Unknown pipeline stage '" + name + "'."));
     }
 
     /**
@@ -150,9 +149,10 @@ public final class PipelineBuilder {
     }
 
     /**
-     * 约束 {@code middleware} 在 {@code other} 之前。两端都是中间件名：按名字登记的实例名，或中间件名（类型名）。
+     * 约束 {@code middleware} 在 {@code other} 之前。两端都是中间件名，与 .NET 的按名字约束同一种匹配：按名字登记的实例只认实例名，
+     * 没有名字的登记认中间件名（类型名）。
      *
-     * <p>约束主体在声明时必须已登记；目标在排序时解析，未登记、对应多个中间件或不在同一阶段报 {@code KERNEL_PIPELINE_003}。
+     * <p>约束主体在声明时必须已登记且唯一；目标在排序时解析，未登记、对应多个中间件或不在同一阶段报 {@code KERNEL_PIPELINE_003}。
      *
      * @param middleware 约束主体
      * @param other 目标
@@ -160,7 +160,7 @@ public final class PipelineBuilder {
      * @throws FrameworkException 约束主体未登记（{@code KERNEL_PIPELINE_003}）
      */
     public PipelineBuilder before(String middleware, String other) {
-        return constrain(middleware, middleware, other);
+        return constrain(middleware, other, true);
     }
 
     /**
@@ -172,7 +172,7 @@ public final class PipelineBuilder {
      * @throws FrameworkException 约束主体未登记（{@code KERNEL_PIPELINE_003}）
      */
     public PipelineBuilder after(String middleware, String other) {
-        return constrain(middleware, other, middleware);
+        return constrain(middleware, other, false);
     }
 
     /**
@@ -235,10 +235,12 @@ public final class PipelineBuilder {
         MiddlewareDescriptor descriptor = new MiddlewareDescriptor(stage, name, instance, owner, placement);
         lock.lock();
         try {
-            // 同一类型的默认实例只登记一次，命名实例的名字在类型内唯一（排序规则 7）：登记时即核对
+            // 同一类型的默认实例只登记一次，命名实例的名字在类型内唯一（排序规则 7）：登记时即核对；消息与 .NET 逐字相同（ADR-0236）
             for (Registration existing : registrations) {
                 if (existing.descriptor().middleware().equals(name) && Objects.equals(existing.descriptor().instance().orElse(null), instance)) {
-                    throw registrationError("The middleware '" + descriptor.display() + "' is registered more than once.");
+                    throw registrationError(instance == null
+                            ? "Middleware '" + name + "' is already registered; each middleware type may appear only once in a pipeline unless its instances are named."
+                            : "Middleware '" + name + "' named '" + instance + "' is already registered; instance names must be unique within a type.");
                 }
             }
             if (registrations.size() >= CAPACITY) {
@@ -251,23 +253,20 @@ public final class PipelineBuilder {
         return this;
     }
 
-    private PipelineBuilder constrain(String subject, String first, String second) {
-        Objects.requireNonNull(first, "middleware");
-        Objects.requireNonNull(second, "other");
+    private PipelineBuilder constrain(String subject, String target, boolean before) {
+        Objects.requireNonNull(subject, "middleware");
+        Objects.requireNonNull(target, "other");
         lock.lock();
         try {
             // 约束主体在声明时就解析：未登记或按名字有歧义都立即报（RFC-0004 第 8 条，ADR-0235）；目标留到排序时解析
-            List<Registration> subjects = candidates(subject);
-            if (subjects.isEmpty()) {
-                throw registrationError("The ordering constraint references the unregistered middleware '" + subject + "'.");
-            }
-            if (subjects.size() > 1) {
-                throw registrationError("The middleware name '" + subject + "' matches several registrations; ordering constraints by it are ambiguous.");
+            Registration found = findByName(subject);
+            if (found == null) {
+                throw registrationError("Middleware '" + subject + "' is not registered, so no ordering constraint can be declared for it.");
             }
             if (constraints.size() >= CONSTRAINT_CAPACITY) {
                 throw registrationError("The pipeline cannot hold more than " + CONSTRAINT_CAPACITY + " ordering constraints.");
             }
-            constraints.add(new Constraint(first, second));
+            constraints.add(new Constraint(found, target, before));
         } finally {
             lock.unlock();
         }
@@ -276,19 +275,13 @@ public final class PipelineBuilder {
 
     /**
      * 按排序规则排序：先阶段；阶段内先位置，再归属，再登记顺序，最后按约束做稳定拓扑排序。
+     *
+     * <p>与 .NET 的 PipelineBuilder 同一个报错顺序（ADR-0236）：按阶段顺序逐个阶段处理，阶段内按基准次序逐个主体解析它的约束
+     * （先全部 before、再全部 after，各按声明顺序），解析完这个阶段再排序，成环即报；然后才轮到下一个阶段。
      */
     private List<Registration> sorted() {
         lock.lock();
         try {
-            List<Registration[]> resolved = new ArrayList<>(constraints.size());
-            for (Constraint constraint : constraints) {
-                Registration first = single(constraint.first());
-                Registration second = single(constraint.second());
-                if (first.descriptor().stage() != second.descriptor().stage()) {
-                    throw registrationError("The ordering constraint between '" + constraint.first() + "' and '" + constraint.second() + "' crosses stages.");
-                }
-                resolved.add(new Registration[] {first, second});
-            }
             Comparator<Registration> base = Comparator.<Registration, Placement>comparing(registration -> registration.descriptor().placement())
                     .thenComparing(registration -> registration.descriptor().owner())
                     .thenComparingInt(Registration::order);
@@ -301,7 +294,18 @@ public final class PipelineBuilder {
                     }
                 }
                 members.sort(base);
-                result.addAll(topologicalSort(stage, members, resolved));
+                List<Registration[]> edges = new ArrayList<>();
+                for (Registration member : members) {
+                    for (boolean before : new boolean[] {true, false}) {
+                        for (Constraint constraint : constraints) {
+                            if (constraint.subject() == member && constraint.before() == before) {
+                                Registration other = resolveTarget(member, constraint.target(), stage);
+                                edges.add(before ? new Registration[] {member, other} : new Registration[] {other, member});
+                            }
+                        }
+                    }
+                }
+                result.addAll(topologicalSort(stage, members, edges));
             }
             return result;
         } finally {
@@ -310,48 +314,52 @@ public final class PipelineBuilder {
     }
 
     /**
-     * 按名字取唯一的登记：名字可以是实例名，也可以是中间件名（类型名）；没有或有多个都是登记错误。
+     * 解析约束的目标：必须已登记、名字唯一且与主体在同一阶段。
      */
-    private Registration single(String name) {
-        List<Registration> found = candidates(name);
-        if (found.isEmpty()) {
-            throw registrationError("The ordering constraint references the unregistered middleware '" + name + "'.");
+    private Registration resolveTarget(Registration source, String target, PipelineStage stage) {
+        Registration other = findByName(target);
+        if (other == null) {
+            throw registrationError("The ordering constraint of middleware '" + source.descriptor().display() + "' references unregistered middleware '"
+                    + target + "'.");
         }
-        if (found.size() > 1) {
-            throw registrationError("The middleware name '" + name + "' matches several registrations; ordering constraints by it are ambiguous.");
+        if (other.descriptor().stage() != stage) {
+            throw registrationError("Middleware '" + source.descriptor().display() + "' (stage '" + stage.manifestName() + "') and '" + target
+                    + "' (stage '" + other.descriptor().stage().manifestName() + "') are not in the same stage, so no relative order can be declared between them.");
         }
-        return found.get(0);
+        return other;
     }
 
-    private List<Registration> candidates(String name) {
-        List<Registration> found = new ArrayList<>();
+    /**
+     * 按名字找登记，与 .NET 的 FindByName 相同：按名字登记的实例只认实例名，没有名字的登记认中间件名。恰好一个返回它，没有返回
+     * {@code null}，多个（不同类型的实例同名，或实例名与某个中间件名相同）即歧义。
+     */
+    private Registration findByName(String name) {
+        Registration found = null;
         for (Registration registration : registrations) {
             MiddlewareDescriptor descriptor = registration.descriptor();
-            if (name.equals(descriptor.middleware()) || name.equals(descriptor.instance().orElse(null))) {
-                found.add(registration);
+            boolean matches = descriptor.instance().map(name::equals).orElseGet(() -> name.equals(descriptor.middleware()));
+            if (!matches) {
+                continue;
             }
+            if (found != null) {
+                throw registrationError("The middleware name '" + name + "' matches several registrations, so ordering constraints by name are ambiguous for it.");
+            }
+            found = registration;
         }
         return found;
     }
 
     /**
      * 在基准次序上应用约束做稳定拓扑排序（Kahn）：每次取基准次序里最靠前的、没有未排前驱的节点，
-     * 所以约束只移动必要的节点，其余保持基准次序；没有可取的节点即成环。
+     * 所以约束只移动必要的节点，其余保持基准次序；没有可取的节点即成环，按基准次序列出全部仍被卡住的中间件（RFC-0004 规则 8）。
      */
-    private static List<Registration> topologicalSort(PipelineStage stage, List<Registration> members, List<Registration[]> constraints) {
-        Set<Registration> inStage = Collections.newSetFromMap(new IdentityHashMap<>());
-        inStage.addAll(members);
+    private static List<Registration> topologicalSort(PipelineStage stage, List<Registration> members, List<Registration[]> edges) {
         Map<Registration, Integer> incoming = new IdentityHashMap<>();
         Map<Registration, List<Registration>> outgoing = new IdentityHashMap<>();
-        for (Registration[] constraint : constraints) {
-            Registration first = constraint[0];
-            Registration second = constraint[1];
-            // 约束已核对为同一阶段：只取本阶段的；出边与入度一一对应，重复声明的约束同样能如实归零
-            if (!inStage.contains(first)) {
-                continue;
-            }
-            outgoing.computeIfAbsent(first, key -> new ArrayList<>()).add(second);
-            incoming.merge(second, 1, Integer::sum);
+        for (Registration[] edge : edges) {
+            // 出边与入度一一对应，重复声明的约束同样能如实归零
+            outgoing.computeIfAbsent(edge[0], key -> new ArrayList<>()).add(edge[1]);
+            incoming.merge(edge[1], 1, Integer::sum);
         }
         List<Registration> remaining = new ArrayList<>(members);
         List<Registration> ordered = new ArrayList<>(members.size());
@@ -364,7 +372,9 @@ public final class PipelineBuilder {
                 }
             }
             if (picked < 0) {
-                throw new FrameworkException(PipelineErrors.CYCLE, "The ordering constraints in stage '" + stage.manifestName() + "' form a cycle.");
+                String stuck = remaining.stream().map(registration -> "'" + registration.descriptor().display() + "'").collect(Collectors.joining(", "));
+                throw new FrameworkException(PipelineErrors.CYCLE, "Middleware ordering constraints in stage '" + stage.manifestName() + "' form a cycle: "
+                        + stuck + ".");
             }
             Registration node = remaining.remove(picked);
             ordered.add(node);
@@ -416,7 +426,7 @@ public final class PipelineBuilder {
         }
     }
 
-    /** 一条顺序约束：{@code first} 在 {@code second} 之前，两端都是中间件名。 */
-    private record Constraint(String first, String second) {
+    /** 一条顺序约束：主体（声明时已解析）在目标之前（{@code before}）或之后，目标是排序时才解析的中间件名。 */
+    private record Constraint(Registration subject, String target, boolean before) {
     }
 }

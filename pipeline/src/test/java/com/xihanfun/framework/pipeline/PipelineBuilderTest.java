@@ -109,7 +109,7 @@ class PipelineBuilderTest {
     }
 
     @Test
-    void namedInstancesAreDistinctButAmbiguousForTypeConstraints() {
+    void namedInstancesAreMatchedByTheirNames() {
         List<String> log = new ArrayList<>();
         PipelineBuilder builder = new PipelineBuilder()
                 .useNamedInstance("guard-a", recording("Guard", log), PipelineStage.OBSERVE, Placement.END, "xihan.plugins.a")
@@ -117,11 +117,21 @@ class PipelineBuilderTest {
         assertEquals("observe      Guard[guard-a]\nobserve      Guard[guard-b]\n", builder.dump());
         assertEquals(Optional.of("guard-a"), builder.describe().get(0).instance());
         builder.useAt(passing("Other"), PipelineStage.OBSERVE, Placement.END, "app");
-        // 约束主体按名字有歧义：声明时即报（RFC-0004 第 8 条）
-        assertCode(PipelineErrors.REGISTRATION, () -> builder.before("Guard", "Other"));
-        // 目标有歧义：排序时报
+        // 按名字登记的实例只认实例名，中间件名对不上它们（与 .NET 的 FindByName 相同，ADR-0236）
+        assertMessage(PipelineErrors.REGISTRATION, "Middleware 'Guard' is not registered, so no ordering constraint can be declared for it.",
+                () -> builder.before("Guard", "Other"));
         builder.before("Other", "Guard");
-        assertCode(PipelineErrors.REGISTRATION, builder::describe);
+        assertMessage(PipelineErrors.REGISTRATION, "The ordering constraint of middleware 'Other' references unregistered middleware 'Guard'.", builder::describe);
+
+        // 实例名与另一个没有名字的中间件同名即歧义：主体在声明时报，目标在排序时报
+        PipelineBuilder clash = new PipelineBuilder()
+                .useNamedInstance("Audit", passing("Guard"), PipelineStage.OBSERVE, Placement.END, "app")
+                .useAt(passing("Audit"), PipelineStage.OBSERVE)
+                .useAt(passing("Other"), PipelineStage.OBSERVE);
+        String ambiguous = "The middleware name 'Audit' matches several registrations, so ordering constraints by name are ambiguous for it.";
+        assertMessage(PipelineErrors.REGISTRATION, ambiguous, () -> clash.before("Audit", "Other"));
+        clash.after("Other", "Audit");
+        assertMessage(PipelineErrors.REGISTRATION, ambiguous, clash::dump);
 
         // 按实例名声明的约束可用（排序规则 7）
         PipelineBuilder named = new PipelineBuilder()
@@ -200,6 +210,12 @@ class PipelineBuilderTest {
         Step step = new PipelineBuilder().useAt(Middleware.of("Broken", (context, next) -> null), PipelineStage.OBSERVE)
                 .build(context -> Result.success());
         assertThrows(IllegalStateException.class, () -> step.invoke(Context.background()));
+    }
+
+    private static void assertMessage(String code, String message, Executable action) {
+        FrameworkException thrown = assertThrows(FrameworkException.class, action);
+        assertEquals(code, thrown.code());
+        assertEquals(message, thrown.getMessage());
     }
 
     private static void assertCode(String code, Executable action) {

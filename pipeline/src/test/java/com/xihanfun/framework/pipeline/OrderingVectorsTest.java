@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * 回放 {@code spec/conformance/vectors/pipeline/ordering.json}（RFC-0004「排序规则」「打印格式」，ADR-0235）：
- * 期望顺序与打印全文逐字相同，每种错误在规定的那一步报出。
+ * 期望顺序与打印全文逐字相同，每种错误在规定的那一步报出，消息原文逐字相同（ADR-0236）。
  */
 class OrderingVectorsTest {
     /** 向量里按名字登记的实例都用这个类型；打印文本里的 {@code {type}} 换成它的类型名。 */
@@ -42,6 +42,7 @@ class OrderingVectorsTest {
         for (JsonNode vector : Vectors.read("pipeline/ordering.json").get("errors")) {
             String name = vector.get("name").textValue();
             String code = vector.get("error").textValue();
+            String message = vector.get("message").textValue().replace("{type}", TYPE);
             JsonNode at = vector.get("at");
             PipelineBuilder builder = new PipelineBuilder();
             JsonNode steps = vector.get("steps");
@@ -50,6 +51,7 @@ class OrderingVectorsTest {
                 if (at.isInt() && at.intValue() == index) {
                     FrameworkException thrown = assertThrows(FrameworkException.class, () -> apply(builder, step), name + ": step " + index);
                     assertEquals(code, thrown.code(), name);
+                    assertEquals(message, thrown.getMessage(), name);
                     break;
                 }
                 apply(builder, step);
@@ -60,6 +62,7 @@ class OrderingVectorsTest {
                         () -> builder.build(context -> Result.success())}) {
                     FrameworkException thrown = assertThrows(FrameworkException.class, sort, name + " when sorting");
                     assertEquals(code, thrown.code(), name);
+                    assertEquals(message, thrown.getMessage(), name);
                 }
             }
         }
