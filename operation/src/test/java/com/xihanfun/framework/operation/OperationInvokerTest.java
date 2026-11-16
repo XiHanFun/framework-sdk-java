@@ -171,7 +171,7 @@ class OperationInvokerTest {
             assertEquals(Map.of("id", "orders.create", "reason", path), error.details(), payload);
         });
         Error isNull = invoker.invoke(Context.background(), OperationRequest.of("orders.create", "null")).outcome().error().orElseThrow();
-        assertEquals(Map.of("id", "orders.create", "reason", "the payload is null"), isNull.details());
+        assertEquals(Map.of("id", "orders.create", "reason", "$"), isNull.details());
         OperationResponse unknown = invoker.invoke(correlated("c3"), OperationRequest.of("orders.create", "{\"quantity\":1,\"extra\":true}"));
         assertTrue(unknown.isOk(), "unknown request fields are ignored");
 

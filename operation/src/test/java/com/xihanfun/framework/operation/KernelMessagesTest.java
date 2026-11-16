@@ -77,7 +77,7 @@ class KernelMessagesTest {
         }
         assertEquals(7, checked, "every operation error of the table is produced");
         assertEquals("xihan.samples.ping", produced.get(OperationMessages.DUPLICATE).details().get("owner"), "the owner of the existing registration");
-        assertEquals("The payload of operation 'pings.send' is not valid: the payload is null", produced.get(OperationMessages.INVALID_PAYLOAD).message());
+        assertEquals("The payload of operation 'pings.send' is not valid: $", produced.get(OperationMessages.INVALID_PAYLOAD).message());
     }
 
     private static Error failure(OperationResponse response) {

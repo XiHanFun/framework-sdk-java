@@ -1,5 +1,7 @@
 package com.xihanfun.framework.operation;
 
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonPointer;
@@ -40,6 +42,9 @@ public final class OperationJson {
                 .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+                // 集合与字典的元素收到 null 即类型不符（整数字典的 {"a":null} 报 $.a，payload-reasons 向量）。不开
+                // FAIL_ON_NULL_FOR_PRIMITIVES：Jackson 对记录类型缺失的成员也按 null 处理，缺省的 0 会变成失败，缺失成员规范不作规定，保持缺省值
+                .defaultSetterInfo(JsonSetter.Value.forContentNulls(Nulls.FAIL))
                 .build();
         for (LogicalType numeric : new LogicalType[] {LogicalType.Integer, LogicalType.Float, LogicalType.Boolean}) {
             mapper.coercionConfigFor(numeric).setCoercion(CoercionInputShape.String, CoercionAction.Fail);
@@ -53,7 +58,7 @@ public final class OperationJson {
 
     /**
      * 解码请求载荷：空或只有空白等价于 {@code {}}；非 JSON、{@code null} 或类型不匹配为 {@code KERNEL_VALIDATION_001}，
-     * {@code reason} 只写 JSON 路径（RFC-0011 规则 2）。
+     * {@code reason} 只写 JSON 路径（RFC-0011 规则 2，ADR-0235）：载荷是 {@code null}、不是对象或根上就不合时为 {@code $}。
      */
     static <T> Result<T> decode(ObjectMapper mapper, String id, byte[] payload, Class<T> type) {
         JsonNode tree;
@@ -63,7 +68,7 @@ public final class OperationJson {
             return Result.fail(invalidPayload(id, pathOf(invalid)));
         }
         if (tree == null || tree.isMissingNode() || tree.isNull()) {
-            return Result.fail(invalidPayload(id, "the payload is null"));
+            return Result.fail(invalidPayload(id, ROOT));
         }
         T value;
         try {
@@ -72,10 +77,16 @@ public final class OperationJson {
             return Result.fail(invalidPayload(id, pathOf(invalid)));
         }
         if (value == null) {
-            return Result.fail(invalidPayload(id, "the payload is null"));
+            return Result.fail(invalidPayload(id, ROOT));
         }
         return Result.ok(value);
     }
+
+    /** 根的路径。 */
+    private static final String ROOT = "$";
+
+    /** 成员名含其中任一字符时写成 {@code ['名字']}（与 System.Text.Json 的路径写法一致）。 */
+    private static final String BRACKETED = ". '/\"[]()\\\t\n\r\f\b\u0085  ";
 
     /**
      * 编码响应；编码失败是操作实现的缺陷，以 {@code KERNEL_UNEXPECTED_001} 结束调用。
@@ -102,14 +113,15 @@ public final class OperationJson {
     }
 
     /**
-     * 取出错位置的 JSON 路径，如 {@code $.items[0].quantity}；不带目标类型名，免得把实现细节暴露给调用方。
+     * 取出错位置的 JSON 路径，如 {@code $.lines[1].quantity}；不带目标类型名，免得把实现细节暴露给调用方。
+     * JSON 语法错误的位置各解析器报得不同，规范只要求以 {@code $} 开头。
      */
     private static String pathOf(Throwable failure) {
         if (failure instanceof JsonMappingException mapping && !mapping.getPath().isEmpty()) {
-            StringBuilder path = new StringBuilder("$");
+            StringBuilder path = new StringBuilder(ROOT);
             for (JsonMappingException.Reference reference : mapping.getPath()) {
                 if (reference.getFieldName() != null) {
-                    path.append('.').append(reference.getFieldName());
+                    appendMember(path, reference.getFieldName());
                 } else if (reference.getIndex() >= 0) {
                     path.append('[').append(reference.getIndex()).append(']');
                 }
@@ -119,16 +131,28 @@ public final class OperationJson {
         if (failure instanceof JsonParseException parse && parse.getProcessor() instanceof JsonParser parser) {
             return pointerPath(parser.getParsingContext().pathAsPointer());
         }
-        return "$";
+        return ROOT;
+    }
+
+    /**
+     * 写一个成员：名字含特殊字符时写 {@code ['名字']}，名字原样、不转义；其余写 {@code .名字}，空名字即 {@code .}。
+     */
+    private static void appendMember(StringBuilder path, String name) {
+        boolean bracketed = name.chars().anyMatch(c -> BRACKETED.indexOf(c) >= 0);
+        if (bracketed) {
+            path.append("['").append(name).append("']");
+        } else {
+            path.append('.').append(name);
+        }
     }
 
     private static String pointerPath(JsonPointer pointer) {
-        StringBuilder path = new StringBuilder("$");
+        StringBuilder path = new StringBuilder(ROOT);
         for (JsonPointer current = pointer; current != null && !current.matches(); current = current.tail()) {
             if (current.mayMatchElement()) {
                 path.append('[').append(current.getMatchingIndex()).append(']');
             } else {
-                path.append('.').append(current.getMatchingProperty());
+                appendMember(path, current.getMatchingProperty());
             }
         }
         return path.toString();
