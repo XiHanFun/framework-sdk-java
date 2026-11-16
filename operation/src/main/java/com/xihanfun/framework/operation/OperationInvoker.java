@@ -1,15 +1,18 @@
 package com.xihanfun.framework.operation;
 
 import com.xihanfun.framework.invocation.Context;
+import com.xihanfun.framework.invocation.InvocationErrors;
 import com.xihanfun.framework.pipeline.PipelineBuilder;
 import com.xihanfun.framework.pipeline.Step;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
+import java.io.InterruptedIOException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 
 /**
  * 让操作经过完整管道执行（RFC-0011 IOperationInvoker）。
@@ -18,6 +21,9 @@ import java.util.Optional;
  * 每次调用从给定的上下文派生出自己的上下文，操作状态随它传递，嵌套与并发的调用互不干扰。
  */
 public final class OperationInvoker {
+    /** 未处理的异常写到这里：JDK 的平台日志，缺省经 java.util.logging 写到 stderr，应用可以换成自己的日志实现。 */
+    private static final System.Logger LOGGER = System.getLogger(OperationInvoker.class.getName());
+
     private final OperationRegistry registry;
     private final Step pipeline;
 
@@ -67,7 +73,7 @@ public final class OperationInvoker {
             return OperationResponse.failed(notFound(request.id()));
         }
         InvocationScope scope = new InvocationScope(descriptor.get(), request, null);
-        Result<Unit> outcome = pipeline.invoke(context.withValue(InvocationScope.KEY, scope));
+        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope), request.id());
         if (outcome.isFailed()) {
             return OperationResponse.failed(outcome.error().orElseThrow());
         }
@@ -107,7 +113,7 @@ public final class OperationInvoker {
                     "actual", request.getClass().getSimpleName() + " -> " + responseType.getSimpleName())));
         }
         InvocationScope scope = new InvocationScope(descriptor, OperationRequest.of(id), request);
-        Result<Unit> outcome = pipeline.invoke(context.withValue(InvocationScope.KEY, scope));
+        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope), id);
         if (outcome.isFailed()) {
             return Result.fail(outcome.error().orElseThrow());
         }
@@ -116,6 +122,56 @@ public final class OperationInvoker {
             return Result.fail(noResponse(id));
         }
         return result.map(responseType::cast);
+    }
+
+    /**
+     * 执行管道并翻译抛出的异常（RFC-0011 规则 5、10）：SDK 没有 Observe 阶段，由调用器承担。
+     *
+     * <p>{@link Exception} 一律翻译为 {@code KERNEL_UNEXPECTED_001} + {@code kernel.invocation.unhandled_exception}，异常本身写进
+     * {@code System.Logger}，不上线；{@link java.lang.Error}（虚拟机错误、断言失败）不翻译、照常抛出。
+     */
+    private Result<Unit> run(Context context, String id) {
+        try {
+            return pipeline.invoke(context);
+        } catch (Exception thrown) {
+            return Result.fail(translate(context, id, thrown));
+        }
+    }
+
+    /**
+     * 取消不按异常翻译：异常是取消引起的、上下文也确实取消了，按令牌归因为超时或取消（RFC-0003 第 1 条）；
+     * 框架异常的错误放进 inner；其余异常没有内部错误。
+     */
+    private static Error translate(Context context, String id, Exception thrown) {
+        if (isCancellation(thrown)) {
+            if (thrown instanceof InterruptedException) {
+                // 吞掉中断异常要恢复中断标志，调用线程之后的等待仍能看到中断
+                Thread.currentThread().interrupt();
+            }
+            Optional<Error> cancellation = context.cancellation();
+            if (cancellation.isPresent()) {
+                return cancellation.get();
+            }
+        }
+        LOGGER.log(System.Logger.Level.ERROR, "The operation '" + id + "' threw an unhandled exception.", thrown);
+        if (thrown instanceof FrameworkException framework) {
+            return InvocationErrors.unhandledException(framework.toError());
+        }
+        return InvocationErrors.unhandledException();
+    }
+
+    /**
+     * 判断异常是不是取消引起的：沿原因链找取消与中断，链长有上限，成环的原因链不会死循环。
+     */
+    private static boolean isCancellation(Throwable thrown) {
+        Throwable current = thrown;
+        for (int depth = 0; current != null && depth < 16; depth++, current = current.getCause()) {
+            if (current instanceof CancellationException || current instanceof InterruptedException
+                    || current instanceof InterruptedIOException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Error notFound(String id) {

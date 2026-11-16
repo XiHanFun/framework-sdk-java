@@ -55,6 +55,13 @@ class KernelMessagesTest {
         produced.put(OperationMessages.REGISTRY_FULL,
                 assertThrows(FrameworkException.class, () -> full.add(OperationContract.of("items.overflow"), Unit.class, Unit.class, nothing)).toError());
 
+        OperationRegistry throwing = new OperationRegistry();
+        throwing.add(OperationContract.of("pings.fail"), Ping.class, Ping.class, (context, request) -> {
+            throw new IllegalStateException("boom");
+        });
+        produced.put(com.xihanfun.framework.invocation.InvocationMessages.UNHANDLED_EXCEPTION,
+                failure(new OperationInvoker(throwing).invoke(Context.background(), OperationRequest.of("pings.fail", "{\"n\":1}"))));
+
         int checked = 0;
         for (JsonNode message : Vectors.read("primitives/kernel-messages.json").get("messages")) {
             String key = message.get("key").textValue();
@@ -68,7 +75,7 @@ class KernelMessagesTest {
             assertEquals(new HashSet<>(Vectors.strings(message.get("arguments"))), error.details().keySet(), key + " arguments");
             assertEquals(MessageTemplate.format(message.get("template").textValue(), error.details()), error.message(), key + " message");
         }
-        assertEquals(6, checked, "every operation error of the table is produced");
+        assertEquals(7, checked, "every operation error of the table is produced");
         assertEquals("xihan.samples.ping", produced.get(OperationMessages.DUPLICATE).details().get("owner"), "the owner of the existing registration");
         assertEquals("The payload of operation 'pings.send' is not valid: the payload is null", produced.get(OperationMessages.INVALID_PAYLOAD).message());
     }

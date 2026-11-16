@@ -10,6 +10,9 @@ public final class InvocationMessages {
     /** 调用开始时截止时间已过：建上下文时截止时间就已经过了。 */
     public static final String DEADLINE_BEFORE_START = "kernel.invocation.deadline_before_start";
 
+    /** 处理器或中间件抛出了未处理的异常；没有参数。 */
+    public static final String UNHANDLED_EXCEPTION = "kernel.invocation.unhandled_exception";
+
     /** 调用被取消。 */
     public static final String CANCELLED = "kernel.invocation.cancelled";
 

@@ -12,7 +12,29 @@ public final class InvocationErrors {
     /** 调用在截止时间到达之前被调用方取消。 */
     public static final String CANCELLED = "KERNEL_CANCELLED_001";
 
+    /** 调用期间发生未处理的异常。 */
+    public static final String UNHANDLED_EXCEPTION = "KERNEL_UNEXPECTED_001";
+
     private InvocationErrors() {
+    }
+
+    /**
+     * 创建未处理异常的错误（RFC-0011 规则 5、10）：没有参数，异常的文本与类型不上线。
+     *
+     * @return {@code KERNEL_UNEXPECTED_001}，消息键 {@value InvocationMessages#UNHANDLED_EXCEPTION}
+     */
+    public static Error unhandledException() {
+        return Error.unexpected(UNHANDLED_EXCEPTION, InvocationMessages.UNHANDLED_EXCEPTION);
+    }
+
+    /**
+     * 创建未处理异常的错误，异常是框架异常（带错误码的配置或编程错误）时它的错误作为内部错误。
+     *
+     * @param inner 框架异常的错误
+     * @return {@code KERNEL_UNEXPECTED_001}，消息键 {@value InvocationMessages#UNHANDLED_EXCEPTION}，内部错误 {@code inner}
+     */
+    public static Error unhandledException(Error inner) {
+        return Error.unexpected(UNHANDLED_EXCEPTION, InvocationMessages.UNHANDLED_EXCEPTION, java.util.Map.of(), inner);
     }
 
     /**
