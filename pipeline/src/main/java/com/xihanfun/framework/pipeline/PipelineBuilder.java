@@ -238,8 +238,13 @@ public final class PipelineBuilder {
         Objects.requireNonNull(second, "other");
         lock.lock();
         try {
-            if (candidates(subject).isEmpty()) {
+            // 约束主体在声明时就解析：未登记或按名字有歧义都立即报（RFC-0004 第 8 条，ADR-0235）；目标留到排序时解析
+            List<Registration> subjects = candidates(subject);
+            if (subjects.isEmpty()) {
                 throw registrationError("The ordering constraint references the unregistered middleware '" + subject + "'.");
+            }
+            if (subjects.size() > 1) {
+                throw registrationError("The middleware name '" + subject + "' matches several registrations; ordering constraints by it are ambiguous.");
             }
             if (constraints.size() >= CONSTRAINT_CAPACITY) {
                 throw registrationError("The pipeline cannot hold more than " + CONSTRAINT_CAPACITY + " ordering constraints.");

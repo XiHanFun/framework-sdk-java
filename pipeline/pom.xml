@@ -20,5 +20,11 @@
       <groupId>com.xihanfun</groupId>
       <artifactId>xihan-framework-invocation</artifactId>
     </dependency>
+    <!-- 只在测试里读一致性向量 -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>

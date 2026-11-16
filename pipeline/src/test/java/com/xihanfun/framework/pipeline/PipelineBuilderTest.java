@@ -116,7 +116,11 @@ class PipelineBuilderTest {
                 .useNamedInstance("guard-b", recording("Guard", log), PipelineStage.OBSERVE, Placement.END, "xihan.plugins.b");
         assertEquals("observe      Guard[guard-a]\nobserve      Guard[guard-b]\n", builder.dump());
         assertEquals(Optional.of("guard-a"), builder.describe().get(0).instance());
-        builder.useAt(passing("Other"), PipelineStage.OBSERVE, Placement.END, "app").before("Guard", "Other");
+        builder.useAt(passing("Other"), PipelineStage.OBSERVE, Placement.END, "app");
+        // 约束主体按名字有歧义：声明时即报（RFC-0004 第 8 条）
+        assertCode(PipelineErrors.REGISTRATION, () -> builder.before("Guard", "Other"));
+        // 目标有歧义：排序时报
+        builder.before("Other", "Guard");
         assertCode(PipelineErrors.REGISTRATION, builder::describe);
 
         // 按实例名声明的约束可用（排序规则 7）
