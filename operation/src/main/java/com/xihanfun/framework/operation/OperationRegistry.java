@@ -23,6 +23,9 @@ public final class OperationRegistry {
     public static final int CAPACITY = 10_000;
 
     private final ObjectMapper mapper;
+
+    /** 按请求类型以文本顺序核对载荷；与 mapper 同一份配置。 */
+    private final RequestShape shape;
     private final ConcurrentHashMap<String, OperationDescriptor> descriptors = new ConcurrentHashMap<>();
 
     /** 只保护登记：重复与容量的判定和写入在同一把锁里完成。 */
@@ -42,6 +45,7 @@ public final class OperationRegistry {
      */
     public OperationRegistry(ObjectMapper mapper) {
         this.mapper = Objects.requireNonNull(mapper, "mapper");
+        this.shape = new RequestShape(mapper);
     }
 
     /**
@@ -145,7 +149,7 @@ public final class OperationRegistry {
         if (owner.isEmpty()) {
             throw new IllegalArgumentException("An operation owner must not be empty; use PipelineBuilder.APP_OWNER for the application.");
         }
-        OperationDescriptor descriptor = OperationDescriptor.create(contract, schema, owner, requestType, responseType, handler, mapper);
+        OperationDescriptor descriptor = OperationDescriptor.create(contract, schema, owner, requestType, responseType, handler, mapper, shape);
         registration.lock();
         try {
             // 先判重复、再判容量：重复的 ID 不论表满不满都报重复

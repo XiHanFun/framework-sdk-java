@@ -96,7 +96,8 @@ class OperationInvokerTest {
         OperationResponse empty = invoker.invoke(Context.background(), OperationRequest.of("orders.create"));
         assertEquals("ORDERS_VALIDATION_001", empty.outcome().error().orElseThrow().code(), "an empty payload is {}");
         OperationResponse blank = invoker.invoke(Context.background(), OperationRequest.of("orders.create", " \n"));
-        assertEquals("ORDERS_VALIDATION_001", blank.outcome().error().orElseThrow().code(), "a blank payload is {}");
+        // 只有空白不是 JSON（RFC-0001「JSON 文本」，ADR-0236）：以前当作 {}
+        assertEquals(Map.of("id", "orders.create", "reason", "$"), blank.outcome().error().orElseThrow().details(), "a blank payload is not JSON");
     }
 
     @Test

@@ -31,8 +31,8 @@ public final class OperationDescriptor {
     }
 
     static <Req, Res> OperationDescriptor create(OperationContract contract, OperationSchema schema, String owner, Class<Req> requestType,
-            Class<Res> responseType, OperationHandler<Req, Res> handler, ObjectMapper mapper) {
-        return new OperationDescriptor(contract, schema, owner, new Executor<>(contract.id(), requestType, responseType, handler, mapper));
+            Class<Res> responseType, OperationHandler<Req, Res> handler, ObjectMapper mapper, RequestShape shape) {
+        return new OperationDescriptor(contract, schema, owner, new Executor<>(contract.id(), requestType, responseType, handler, mapper, shape));
     }
 
     /**
@@ -106,9 +106,9 @@ public final class OperationDescriptor {
 
     /** 不经反射调用处理器的执行入口：类型参数在登记时就确定了。 */
     private record Executor<Req, Res>(String id, Class<Req> requestType, Class<Res> responseType, OperationHandler<Req, Res> handler,
-            ObjectMapper mapper) {
+            ObjectMapper mapper, RequestShape shape) {
         OperationResponse execute(Context context, byte[] payload) {
-            Result<Req> request = OperationJson.decode(mapper, id, payload, requestType);
+            Result<Req> request = OperationJson.decode(mapper, shape, id, payload, requestType);
             if (request.isFailed()) {
                 return OperationResponse.failed(request.error().orElseThrow());
             }
