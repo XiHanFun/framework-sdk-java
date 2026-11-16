@@ -22,6 +22,9 @@ final class InvocationScope {
     /** 类型化调用的请求对象；XGI 调用为 {@code null}。 */
     final Object typedRequest;
 
+    /** Validate 阶段解码出的请求对象；原始调用在这里，类型化调用为 {@code null}。 */
+    volatile Object decodedRequest;
+
     /** handle 阶段写回的响应载荷；终点与中间件可能不在同一线程，所以是 volatile。 */
     volatile byte[] responsePayload;
 
@@ -48,7 +51,16 @@ final class InvocationScope {
             scope.typedResult = result;
             return result.toUnit();
         }
-        OperationResponse response = scope.descriptor.execute(context, scope.request.payloadView());
+        Object request = scope.decodedRequest;
+        if (request == null) {
+            // 有中间件绕过了 Validate 阶段直接调到终点（如换了一份管道）：在这里解码，载荷不合法照样不执行操作
+            Result<?> decoded = scope.descriptor.decode(scope.request.payloadView());
+            if (decoded.isFailed()) {
+                return Result.fail(decoded.error().orElseThrow());
+            }
+            request = decoded.value().orElseThrow();
+        }
+        OperationResponse response = scope.descriptor.executeDecoded(context, request);
         if (response.isOk()) {
             scope.responsePayload = response.payloadView();
         }

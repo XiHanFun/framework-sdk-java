@@ -81,10 +81,17 @@ public final class OperationDescriptor {
     }
 
     /**
-     * 解码载荷、执行、编码响应。
+     * 把载荷解码成请求对象（Validate 阶段的内置步骤，RFC-0011 规则 2、10）。
      */
-    OperationResponse execute(Context context, byte[] payload) {
-        return executor.execute(context, payload);
+    Result<?> decode(byte[] payload) {
+        return executor.decode(payload);
+    }
+
+    /**
+     * 以已解码的请求执行，编码响应。
+     */
+    OperationResponse executeDecoded(Context context, Object request) {
+        return executor.executeDecoded(context, request);
     }
 
     /**
@@ -107,12 +114,12 @@ public final class OperationDescriptor {
     /** 不经反射调用处理器的执行入口：类型参数在登记时就确定了。 */
     private record Executor<Req, Res>(String id, Class<Req> requestType, Class<Res> responseType, OperationHandler<Req, Res> handler,
             ObjectMapper mapper, RequestShape shape) {
-        OperationResponse execute(Context context, byte[] payload) {
-            Result<Req> request = OperationJson.decode(mapper, shape, id, payload, requestType);
-            if (request.isFailed()) {
-                return OperationResponse.failed(request.error().orElseThrow());
-            }
-            Result<Res> result = handle(context, request.value().orElseThrow());
+        Result<Req> decode(byte[] payload) {
+            return OperationJson.decode(mapper, shape, id, payload, requestType);
+        }
+
+        OperationResponse executeDecoded(Context context, Object request) {
+            Result<Res> result = handle(context, requestType.cast(request));
             if (result.isFailed()) {
                 return OperationResponse.failed(result.error().orElseThrow());
             }

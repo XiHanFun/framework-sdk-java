@@ -1,6 +1,7 @@
 package com.xihanfun.framework.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.xihanfun.framework.invocation.CancellableContext;
@@ -8,11 +9,13 @@ import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.invocation.InvocationErrors;
 import com.xihanfun.framework.pipeline.Middleware;
 import com.xihanfun.framework.pipeline.PipelineBuilder;
+import com.xihanfun.framework.pipeline.Placement;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.PipelineStage;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
@@ -20,7 +23,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * 处理器或中间件抛出的异常由调用器翻译为 {@code KERNEL_UNEXPECTED_001} + {@code kernel.invocation.unhandled_exception}
- * （RFC-0011 规则 5、10，ADR-0235）：没有参数，框架异常的错误放进 inner，取消不按异常翻译。
+ * （RFC-0011 规则 5、10，ADR-0235）：没有参数，框架异常的错误放进 inner，取消不按异常翻译。三个内置步骤的位置与 .NET 的内置中间件相同
+ * （ADR-0236）：Observe 阶段翻译异常，Resilience 阶段核对截止时间，Validate 阶段解码。
  */
 class UnhandledExceptionTest {
     private static final String UNHANDLED = "kernel.invocation.unhandled_exception";
@@ -89,13 +93,19 @@ class UnhandledExceptionTest {
     }
 
     @Test
-    void anExpiredDeadlineStopsTheCallBeforeTheFirstMiddleware() {
-        // RFC-0011 规则 10：调用器在第一个中间件之前按时钟核对截止时间，已到即结束、管道不执行
-        java.util.concurrent.atomic.AtomicInteger entered = new java.util.concurrent.atomic.AtomicInteger();
-        PipelineBuilder pipeline = new PipelineBuilder().useAt(Middleware.of("Count", (context, next) -> {
-            entered.incrementAndGet();
-            return next.invoke(context);
-        }), PipelineStage.OBSERVE);
+    void anExpiredDeadlineStopsTheCallInTheResilienceStage() {
+        // RFC-0011 规则 10（ADR-0236）：截止时间由 Resilience 阶段开头的内置步骤核对，Ingress 与 Observe 阶段的中间件照常执行
+        java.util.concurrent.atomic.AtomicInteger observed = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger authorized = new java.util.concurrent.atomic.AtomicInteger();
+        PipelineBuilder pipeline = new PipelineBuilder()
+                .useAt(Middleware.of("Count", (context, next) -> {
+                    observed.incrementAndGet();
+                    return next.invoke(context);
+                }), PipelineStage.OBSERVE)
+                .useAt(Middleware.of("Authorize", (context, next) -> {
+                    authorized.incrementAndGet();
+                    return next.invoke(context);
+                }), PipelineStage.AUTHORIZE);
         OperationInvoker invoker = invoker((context, request) -> Result.success(), pipeline);
         Context expired = Context.builder().deadline(java.time.Instant.now().minusSeconds(1)).build();
         Error error = xgi(invoker, expired);
@@ -104,9 +114,50 @@ class UnhandledExceptionTest {
         assertEquals("The invocation exceeded its deadline before it started.", error.message());
         assertEquals(Optional.of("kernel.invocation.deadline_before_start"),
                 invoker.invoke(expired, "jobs.run", Unit.VALUE, Unit.class).error().orElseThrow().messageKey());
-        assertEquals(0, entered.get(), "the pipeline does not run");
+        assertEquals(2, observed.get(), "the observe stage runs before the deadline check");
+        assertEquals(0, authorized.get(), "later stages do not run");
+        // 截止时间先于解码：两样都不对时报截止时间
+        assertEquals(Optional.of("kernel.invocation.deadline_before_start"),
+                invoker.invoke(expired, OperationRequest.of("jobs.run", "{")).outcome().error().orElseThrow().messageKey());
         assertTrue(invoker.invoke(Context.builder().timeout(java.time.Duration.ofSeconds(30)).build(), OperationRequest.of("jobs.run")).isOk());
-        assertEquals(1, entered.get());
+        assertEquals(1, authorized.get());
+    }
+
+    @Test
+    void exceptionsBeforeTheObserveStepReachTheCaller() {
+        // Observe 阶段的内置步骤只接住排在它之后的异常：Ingress 阶段与 Observe 阶段开头归属排在 xihan.kernel.core 之前的照常抛出
+        Middleware broken = Middleware.of("Broken", (context, next) -> {
+            throw new UnsupportedOperationException("no");
+        });
+        for (PipelineBuilder pipeline : List.of(new PipelineBuilder().useAt(broken, PipelineStage.INGRESS),
+                new PipelineBuilder().useAt(broken, PipelineStage.OBSERVE, Placement.BEGINNING, PipelineBuilder.APP_OWNER))) {
+            OperationInvoker invoker = invoker((context, request) -> Result.success(), pipeline);
+            assertThrows(UnsupportedOperationException.class, () -> invoker.invoke(Context.background(), OperationRequest.of("jobs.run")));
+        }
+        // 归属排在 xihan.kernel.core 之后的、同位置的中间件在内置步骤之后执行，它的异常被翻译
+        OperationInvoker later = invoker((context, request) -> Result.success(),
+                new PipelineBuilder().useAt(broken, PipelineStage.OBSERVE, Placement.BEGINNING, "xihan.plugins.audit"));
+        assertUnhandled(xgi(later, Context.background()));
+    }
+
+    @Test
+    void payloadsAreDecodedInTheValidateStage() {
+        // 解码在 Validate 阶段开头：Authorize 阶段先拒绝时载荷不解码，报的是拒绝
+        Error denied = Error.denied("ORDERS_DENIED_001", "orders.denied");
+        OperationInvoker invoker = invoker((context, request) -> Result.success(),
+                new PipelineBuilder().useAt(Middleware.of("Deny", (context, next) -> Result.fail(denied)), PipelineStage.AUTHORIZE));
+        assertEquals("ORDERS_DENIED_001", invoker.invoke(Context.background(), OperationRequest.of("jobs.run", "{")).outcome().error()
+                .orElseThrow().code());
+        // Validate 阶段之后的中间件只在载荷合法时执行
+        java.util.concurrent.atomic.AtomicInteger handled = new java.util.concurrent.atomic.AtomicInteger();
+        OperationInvoker counting = invoker((context, request) -> Result.success(), new PipelineBuilder().useAt(Middleware.of("Count",
+                (context, next) -> {
+                    handled.incrementAndGet();
+                    return next.invoke(context);
+                }), PipelineStage.TRANSACTION));
+        assertEquals(OperationErrors.INVALID_PAYLOAD, counting.invoke(Context.background(), OperationRequest.of("jobs.run", "[")).outcome()
+                .error().orElseThrow().code());
+        assertEquals(0, handled.get());
     }
 
     @Test

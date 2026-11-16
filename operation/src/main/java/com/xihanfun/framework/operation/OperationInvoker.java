@@ -1,19 +1,17 @@
 package com.xihanfun.framework.operation;
 
 import com.xihanfun.framework.invocation.Context;
-import com.xihanfun.framework.invocation.InvocationErrors;
 import com.xihanfun.framework.pipeline.PipelineBuilder;
+import com.xihanfun.framework.pipeline.Placement;
 import com.xihanfun.framework.pipeline.Step;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
+import com.xihanfun.framework.primitives.PipelineStage;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
-import java.io.InterruptedIOException;
-import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CancellationException;
 
 /**
  * 让操作经过完整管道执行（RFC-0011 IOperationInvoker）。
@@ -22,8 +20,8 @@ import java.util.concurrent.CancellationException;
  * 每次调用从给定的上下文派生出自己的上下文，操作状态随它传递，嵌套与并发的调用互不干扰。
  */
 public final class OperationInvoker {
-    /** 未处理的异常写到这里：JDK 的平台日志，缺省经 java.util.logging 写到 stderr，应用可以换成自己的日志实现。 */
-    private static final System.Logger LOGGER = System.getLogger(OperationInvoker.class.getName());
+    /** 内置步骤的归属：内核清单（与 .NET 的内置中间件相同）。 */
+    public static final String KERNEL_OWNER = "xihan.kernel.core";
 
     private final OperationRegistry registry;
     private final Step pipeline;
@@ -40,13 +38,26 @@ public final class OperationInvoker {
     /**
      * 用登记表与管道创建调用器：管道的终点在 handle 阶段之后分派当前操作。
      *
+     * <p>调用器在管道上加三个内置步骤，位置与 .NET 的内置中间件相同（RFC-0011 规则 10，ADR-0236）：都按归属 {@value #KERNEL_OWNER}
+     * 放在所在阶段的 {@link Placement#BEGINNING}，与同位置的其他中间件按 RFC-0004 的规则排序（归属的序数序、同归属按登记顺序，
+     * 内置步骤登记在使用者的中间件之后）：
+     * <ul>
+     *   <li>Observe：翻译异常，只接住排在它之后的中间件与处理器抛出的异常</li>
+     *   <li>Resilience：进入时截止时间已到即 {@code KERNEL_TIMEOUT_001} + {@code kernel.invocation.deadline_before_start}</li>
+     *   <li>Validate：原始调用在这里解码载荷，失败即 {@code KERNEL_VALIDATION_001}；类型化调用跳过</li>
+     * </ul>
+     *
      * @param registry 登记表
-     * @param pipeline 管道构建器；只在构造时读一次
+     * @param pipeline 管道构建器；只在构造时复制一次，不改动它
      * @throws FrameworkException 管道排序失败（{@code KERNEL_PIPELINE_00x}）
      */
     public OperationInvoker(OperationRegistry registry, PipelineBuilder pipeline) {
         this.registry = Objects.requireNonNull(registry, "registry");
-        this.pipeline = Objects.requireNonNull(pipeline, "pipeline").build(InvocationScope::dispatch);
+        this.pipeline = Objects.requireNonNull(pipeline, "pipeline").copy()
+                .useAt(new ObserveMiddleware(), PipelineStage.OBSERVE, Placement.BEGINNING, KERNEL_OWNER)
+                .useAt(new DeadlineMiddleware(), PipelineStage.RESILIENCE, Placement.BEGINNING, KERNEL_OWNER)
+                .useAt(new ValidationMiddleware(), PipelineStage.VALIDATE, Placement.BEGINNING, KERNEL_OWNER)
+                .build(InvocationScope::dispatch);
     }
 
     /**
@@ -59,8 +70,8 @@ public final class OperationInvoker {
     }
 
     /**
-     * 执行一个 XGI 请求：未登记返回 {@code KERNEL_NOTFOUND_001}（不进管道）；否则经完整管道执行，载荷不合法为
-     * {@code KERNEL_VALIDATION_001}，成功时带响应类型的 JSON。
+     * 执行一个 XGI 请求：未登记返回 {@code KERNEL_NOTFOUND_001}（不进管道）；否则经完整管道执行，载荷在 Validate 阶段解码，
+     * 不合法为 {@code KERNEL_VALIDATION_001}，成功时带响应类型的 JSON。
      *
      * @param context 调用上下文
      * @param request XGI 请求
@@ -74,7 +85,7 @@ public final class OperationInvoker {
             return OperationResponse.failed(notFound(request.id()));
         }
         InvocationScope scope = new InvocationScope(descriptor.get(), request, null);
-        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope), request.id());
+        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope));
         if (outcome.isFailed()) {
             return OperationResponse.failed(outcome.error().orElseThrow());
         }
@@ -95,7 +106,8 @@ public final class OperationInvoker {
      * @param responseType 期望的响应类型，必须能接收登记的响应类型
      * @param <Req> 请求类型
      * @param <Res> 响应类型
-     * @return 结果：未登记为 {@code KERNEL_NOTFOUND_001}，类型与登记不符为 {@code KERNEL_VALIDATION_002}
+     * @return 结果：未登记为 {@code KERNEL_NOTFOUND_001}，类型与登记不符为 {@code KERNEL_VALIDATION_002}（只带 {@code id}，ADR-0236）；
+     *     进入管道前只做这两项核对，按这个顺序
      */
     public <Req, Res> Result<Res> invoke(Context context, String id, Req request, Class<Res> responseType) {
         Objects.requireNonNull(context, "context");
@@ -113,7 +125,7 @@ public final class OperationInvoker {
             return Result.fail(Error.validation(OperationErrors.TYPE_MISMATCH, OperationMessages.TYPE_MISMATCH, Map.of("id", id)));
         }
         InvocationScope scope = new InvocationScope(descriptor, OperationRequest.of(id), request);
-        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope), id);
+        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope));
         if (outcome.isFailed()) {
             return Result.fail(outcome.error().orElseThrow());
         }
@@ -125,58 +137,10 @@ public final class OperationInvoker {
     }
 
     /**
-     * 执行管道并翻译抛出的异常（RFC-0011 规则 5、10）：SDK 没有 Observe 阶段，由调用器承担。
-     *
-     * <p>{@link Exception} 一律翻译为 {@code KERNEL_UNEXPECTED_001} + {@code kernel.invocation.unhandled_exception}，异常本身写进
-     * {@code System.Logger}，不上线；{@link java.lang.Error}（虚拟机错误、断言失败）不翻译、照常抛出。
+     * 执行管道；异常由 Observe 阶段的内置步骤翻译，排在它之前的中间件抛出的异常原样交给调用方（RFC-0011 规则 10）。
      */
-    private Result<Unit> run(Context context, String id) {
-        // SDK 没有截止时间中间件：调用器在第一个中间件之前按时钟核对，已到即结束、管道不执行（RFC-0011 规则 10）
-        Optional<Instant> deadline = context.deadline();
-        if (deadline.isPresent() && !Instant.now().isBefore(deadline.get())) {
-            return Result.fail(InvocationErrors.deadlineBeforeStart());
-        }
-        try {
-            return pipeline.invoke(context);
-        } catch (Exception thrown) {
-            return Result.fail(translate(context, id, thrown));
-        }
-    }
-
-    /**
-     * 取消不按异常翻译：异常是取消引起的、上下文也确实取消了，按令牌归因为超时或取消（RFC-0003 第 1 条）；
-     * 框架异常的错误放进 inner；其余异常没有内部错误。
-     */
-    private static Error translate(Context context, String id, Exception thrown) {
-        if (isCancellation(thrown)) {
-            if (thrown instanceof InterruptedException) {
-                // 吞掉中断异常要恢复中断标志，调用线程之后的等待仍能看到中断
-                Thread.currentThread().interrupt();
-            }
-            Optional<Error> cancellation = context.cancellation();
-            if (cancellation.isPresent()) {
-                return cancellation.get();
-            }
-        }
-        LOGGER.log(System.Logger.Level.ERROR, "The operation '" + id + "' threw an unhandled exception.", thrown);
-        if (thrown instanceof FrameworkException framework) {
-            return InvocationErrors.unhandledException(framework.toError());
-        }
-        return InvocationErrors.unhandledException();
-    }
-
-    /**
-     * 判断异常是不是取消引起的：沿原因链找取消与中断，链长有上限，成环的原因链不会死循环。
-     */
-    private static boolean isCancellation(Throwable thrown) {
-        Throwable current = thrown;
-        for (int depth = 0; current != null && depth < 16; depth++, current = current.getCause()) {
-            if (current instanceof CancellationException || current instanceof InterruptedException
-                    || current instanceof InterruptedIOException) {
-                return true;
-            }
-        }
-        return false;
+    private Result<Unit> run(Context context) {
+        return pipeline.invoke(context);
     }
 
     private static Error notFound(String id) {
