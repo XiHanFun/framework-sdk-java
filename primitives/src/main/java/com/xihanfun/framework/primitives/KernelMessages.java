@@ -22,6 +22,7 @@ public final class KernelMessages {
             Map.entry("kernel.invocation.deadline_exceeded", "The invocation exceeded its deadline."),
             Map.entry("kernel.invocation.deadline_before_start", "The invocation exceeded its deadline before it started."),
             Map.entry("kernel.invocation.cancelled", "The invocation was canceled."),
+            Map.entry("kernel.invocation.unhandled_exception", "An unhandled exception occurred during the invocation."),
             Map.entry("kernel.operation.unknown", "Operation '{id}' is not registered."),
             Map.entry("kernel.operation.invalid_payload", "The payload of operation '{id}' is not valid: {reason}"),
             Map.entry("kernel.operation.type_mismatch", "Operation '{id}' handles '{expected}', but '{actual}' was supplied."),

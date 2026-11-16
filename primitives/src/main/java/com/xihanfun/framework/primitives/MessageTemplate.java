@@ -5,6 +5,7 @@ import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
+import java.math.MathContext;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -167,10 +168,14 @@ public final class MessageTemplate {
     }
 
     /**
-     * 把参数值转成文本（RFC-0010「值的文本形式」）：字符串原样，整数十进制，布尔写 {@code true} / {@code false}，{@code null} 写空串；
-     * 浮点在 1e-4 ≤ |x| &lt; 1e15 或 x = 0 时写能往返的最短十进制、不用指数，整数值的浮点不带小数点。
-     *
-     * <p>范围之外的浮点、数组与对象规范不作规定，这里用 Java 的缺省文本。
+     * 把参数值转成文本（RFC-0010「值的文本形式」，ADR-0233、ADR-0235）：字符串原样，整数十进制，布尔写 {@code true} / {@code false}，
+     * {@code null} 写空串。浮点写能往返的最短十进制：
+     * <ul>
+     *   <li>1e-4 ≤ |x| &lt; 1e17 或 x = 0 时不用指数，整数值不带小数点（{@code 2}、{@code 10000000000000000}）</li>
+     *   <li>范围之外写有效数字加指数：{@code E}、总写的符号、至少两位的指数，如 {@code 1E+17}、{@code 9.9E-05}、{@code 5E-324}</li>
+     *   <li>负零写 {@code -0}；非数与无穷写 {@code NaN}、{@code Infinity}、{@code -Infinity}</li>
+     * </ul>
+     * 数组与对象规范不作规定，这里用 Java 的缺省文本。
      *
      * @param value 参数值
      * @return 文本
@@ -180,11 +185,10 @@ public final class MessageTemplate {
             return "";
         }
         if (value instanceof Double number) {
-            return floating(number, Double.toString(number));
+            return floating(number, false);
         }
         if (value instanceof Float number) {
-            // Float.toString 是 float 精度下最短的往返文本，不经 double 放大出多余的位
-            return floating(number.doubleValue(), Float.toString(number));
+            return floating(number.doubleValue(), true);
         }
         if (value instanceof BigDecimal decimal) {
             return decimal.toPlainString();
@@ -192,16 +196,51 @@ public final class MessageTemplate {
         return value.toString();
     }
 
-    private static String floating(double number, String shortest) {
+    private static String floating(double number, boolean single) {
+        if (Double.isNaN(number)) {
+            return "NaN";
+        }
+        if (Double.isInfinite(number)) {
+            return number > 0 ? "Infinity" : "-Infinity";
+        }
+        if (number == 0) {
+            return isNegative(number) ? "-0" : "0";
+        }
+        BigDecimal shortest = shortest(number, single);
         double magnitude = Math.abs(number);
-        if (!Double.isFinite(number) || (magnitude != 0 && (magnitude < 1e-4 || magnitude >= 1e15))) {
-            return shortest;
+        if (magnitude >= 1e-4 && magnitude < 1e17) {
+            return shortest.toPlainString();
         }
-        if (number == Math.rint(number)) {
-            return Long.toString((long) number);
+        // 有效数字 d.ddd 加指数，与 .NET 的往返格式相同：E、总写的符号、至少两位
+        String digits = shortest.unscaledValue().abs().toString();
+        int exponent = digits.length() - 1 - shortest.scale();
+        String mantissa = digits.length() == 1 ? digits : digits.charAt(0) + "." + digits.substring(1);
+        String exponentDigits = Integer.toString(Math.abs(exponent));
+        return (shortest.signum() < 0 ? "-" : "") + mantissa + "E" + (exponent < 0 ? "-" : "+")
+                + (exponentDigits.length() < 2 ? "0" + exponentDigits : exponentDigits);
+    }
+
+    /**
+     * 求能往返的最短十进制。Java 的 Double.toString（JDK 19 起）是最短往返的，只是至少写两位有效数字（{@code 4.9E-324}），
+     * 所以两位以内的结果再试一位：按精确值舍到一位有效数字，读回仍是同一个值就用它（{@code 5E-324}）。
+     */
+    private static BigDecimal shortest(double number, boolean single) {
+        BigDecimal candidate = new BigDecimal(single ? Float.toString((float) number) : Double.toString(number)).stripTrailingZeros();
+        if (candidate.precision() <= 2) {
+            BigDecimal one = new BigDecimal(number).round(new MathContext(1, RoundingMode.HALF_EVEN)).stripTrailingZeros();
+            boolean roundTrips = single ? one.floatValue() == (float) number : one.doubleValue() == number;
+            if (roundTrips) {
+                return one;
+            }
         }
-        // Java 的 Double.toString 自 JDK 19 起是最短往返形式，只是可能带指数（如 1.0E-4）；转成十进制再去掉末尾的零
-        return new BigDecimal(shortest).stripTrailingZeros().toPlainString();
+        return candidate;
+    }
+
+    /**
+     * 判断浮点是否为负，含负零：负零与零比较相等，要看符号位。
+     */
+    private static boolean isNegative(double number) {
+        return Double.doubleToRawLongBits(number) < 0;
     }
 
     private static Optional<String> render(String template, Map<String, ?> arguments, boolean strict) {
@@ -251,10 +290,19 @@ public final class MessageTemplate {
             case 'D', 'd' -> integer(value).map(number -> (number.signum() < 0 ? "-" : "") + pad(number.abs().toString(), width));
             case 'X' -> integer(value).filter(number -> number.signum() >= 0).map(number -> pad(number.toString(16).toUpperCase(Locale.ROOT), width));
             case 'x' -> integer(value).filter(number -> number.signum() >= 0).map(number -> pad(number.toString(16), width));
-            case 'F', 'f' -> decimal(value).map(number -> number.setScale(scale, RoundingMode.HALF_EVEN).toPlainString());
-            case 'N', 'n' -> decimal(value).map(number -> grouped(number.setScale(scale, RoundingMode.HALF_EVEN).toPlainString()));
+            case 'F', 'f' -> decimal(value).map(number -> signed(value, number.abs().setScale(scale, RoundingMode.HALF_EVEN).toPlainString()));
+            case 'N', 'n' -> decimal(value).map(number -> signed(value, grouped(number.abs().setScale(scale, RoundingMode.HALF_EVEN).toPlainString())));
             default -> Optional.empty();
         };
+    }
+
+    /**
+     * 给定点小数加负号：负数舍入成零时保留负号（{@code -0.00}），负零同样（与 .NET 一致）。BigDecimal 没有负零，所以符号按原值判断、单独写出。
+     */
+    private static String signed(Object value, String unsigned) {
+        boolean negative = value instanceof Double || value instanceof Float ? isNegative(((Number) value).doubleValue())
+                : decimal(value).map(number -> number.signum() < 0).orElse(false);
+        return negative ? "-" + unsigned : unsigned;
     }
 
     private static Optional<BigInteger> integer(Object value) {
