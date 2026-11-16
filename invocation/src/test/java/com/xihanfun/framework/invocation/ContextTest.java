@@ -122,10 +122,15 @@ class ContextTest {
         }
         Context tenanted = Context.builder().baggage(BaggageKeys.TENANT, "t1").build();
         for (String value : Vectors.strings(values.get("unacceptable"))) {
+            // 外部输入：丢弃不合的成员，已经给出的同名值保留（ADR-0235）
             assertEquals(Optional.empty(), Context.builder().baggage(BaggageKeys.TENANT, value).build().tenant(), "built: " + value);
-            assertEquals(Optional.empty(), tenanted.withBaggage(BaggageKeys.TENANT, value).tenant(), "derived, and the old value is not kept: " + value);
-            // 幂等键不按这条丢弃；未登记的进程内键不受约束
+            assertEquals(Optional.of("t1"), Context.builder().baggage(BaggageKeys.TENANT, "t1").baggage(BaggageKeys.TENANT, value).build().tenant(),
+                    "the earlier value stays: " + value);
+            // 程序内逐项派生：编程错误，抛出
+            assertThrows(IllegalArgumentException.class, () -> tenanted.withBaggage(BaggageKeys.TENANT, value), "derived: " + value);
+            // 幂等键两种情形都例外；未登记的进程内键不受约束
             assertEquals(Optional.of(value), Context.builder().baggage(BaggageKeys.IDEMPOTENCY_KEY, value).build().idempotencyKey(), value);
+            assertEquals(Optional.of(value), Context.background().withBaggage(BaggageKeys.IDEMPOTENCY_KEY, value).idempotencyKey(), value);
             assertEquals(Optional.of(value), Context.background().withBaggage("xihan.feature-flag", value).findBaggage("xihan.feature-flag"));
         }
     }

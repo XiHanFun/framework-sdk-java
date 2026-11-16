@@ -286,25 +286,26 @@ public final class Context {
     /**
      * 派生一个多一个 Baggage 键值的上下文；格式合法但未登记的 {@code xihan.<name>} 键只在进程内有效，出进程时剥离。
      *
-     * <p>已登记键的值不可接受时（{@link BaggageKeys#isAcceptableValue(String)}：空、超过 256 个 UTF-16 码元、含控制字符），派生出的上下文
-     * 不带这个键（conventions/baggage-keys.md，ADR-0233），原来的值也不保留，免得悄悄沿用旧的租户或主体；
-     * {@code xihan.idempotency-key} 例外，原样保留，由 idempotency 阶段以校验错误拒绝。
+     * <p>程序内逐项派生给已登记的键一个不可接受的值（{@link BaggageKeys#isAcceptableValue(String)}：空、超过 256 个 UTF-16 码元、含控制字符）
+     * 是编程错误，抛出 {@link IllegalArgumentException}，与键不合文法时一样，不静默丢弃也不保留原值
+     * （conventions/baggage-keys.md，ADR-0235）；{@code xihan.idempotency-key} 例外，原样保留，由 idempotency 阶段以校验错误拒绝。
+     * 外部输入经 {@link Builder#baggage(String, String)} 进入，那里丢弃不合的成员。
      *
      * @param key 键，必须符合 {@code xihan.<name>}
      * @param value 值
      * @return 新的上下文
-     * @throws IllegalArgumentException 键不合格式
+     * @throws IllegalArgumentException 键不合格式，或已登记键的值不可接受
      * @throws IllegalStateException Baggage 已满
      */
     public Context withBaggage(String key, String value) {
         requireBaggageKey(key);
         Objects.requireNonNull(value, "value");
-        Map<String, String> copy = new TreeMap<>(baggage);
-        if (admits(key, value)) {
-            copy.put(key, value);
-        } else {
-            copy.remove(key);
+        if (!admits(key, value)) {
+            throw new IllegalArgumentException("The value of the baggage key '" + key + "' must be non-empty, at most "
+                    + BaggageKeys.MAX_VALUE_LENGTH + " UTF-16 code units and free of control characters.");
         }
+        Map<String, String> copy = new TreeMap<>(baggage);
+        copy.put(key, value);
         requireBaggageCapacity(copy.size());
         return new Context(cancellation, traceId, spanId, traceFlags, Collections.unmodifiableMap(copy), items, values);
     }
@@ -433,8 +434,8 @@ public final class Context {
     }
 
     /**
-     * 判断一个成员能否进入上下文：丢弃发生在构造与派生上下文的入口，上下文只携带已经通过的值（conventions/baggage-keys.md）。
-     * 约束只管已登记的键；幂等键不按它丢弃，丢了它重复的调用会执行两次。
+     * 判断一个成员能否进入上下文：外部输入在入口丢弃不合的成员，程序内派生不合即报错，上下文只携带已经通过的值
+     * （conventions/baggage-keys.md）。约束只管已登记的键；幂等键两种情形都例外，丢了它重复的调用会执行两次。
      */
     private static boolean admits(String key, String value) {
         return !BaggageKeys.isRegistered(key) || BaggageKeys.IDEMPOTENCY_KEY.equals(key) || BaggageKeys.isAcceptableValue(value);
@@ -522,7 +523,10 @@ public final class Context {
         }
 
         /**
-         * 设置一个 Baggage 键值。
+         * 设置一个 Baggage 键值：这是外部输入（载体、插件元数据）进入上下文的入口。
+         *
+         * <p>已登记键的值不可接受时丢弃这个成员，已经设置的同名值保留（与 W3C Baggage 忽略不合法的成员一致，ADR-0235）；
+         * {@code xihan.idempotency-key} 除外。键不合文法仍是编程错误。
          *
          * @param key 键，必须符合 {@code xihan.<name>}
          * @param value 值
@@ -532,8 +536,11 @@ public final class Context {
          */
         public Builder baggage(String key, String value) {
             requireBaggageKey(key);
-            baggage.put(key, Objects.requireNonNull(value, "value"));
-            requireBaggageCapacity(baggage.size());
+            Objects.requireNonNull(value, "value");
+            if (admits(key, value)) {
+                baggage.put(key, value);
+                requireBaggageCapacity(baggage.size());
+            }
             return this;
         }
 
@@ -553,20 +560,13 @@ public final class Context {
         /**
          * 构建根上下文；有截止时间时起定时器，到点触发截止令牌。
          *
-         * <p>已登记键的值不可接受的成员在这里丢弃（与 W3C Baggage 忽略不合法的成员一致），{@code xihan.idempotency-key} 除外。
-         *
          * @return 上下文
          */
         public Context build() {
             String trace = traceId != null ? traceId : TraceParent.newTraceId();
             String span = spanId != null ? spanId : TraceParent.newSpanId();
-            Map<String, String> admitted = new TreeMap<>();
-            baggage.forEach((key, value) -> {
-                if (admits(key, value)) {
-                    admitted.put(key, value);
-                }
-            });
-            return new Context(CancellationState.root(deadline), trace, span, traceFlags, Collections.unmodifiableMap(admitted), new Items(), Map.of());
+            return new Context(CancellationState.root(deadline), trace, span, traceFlags, Collections.unmodifiableMap(new TreeMap<>(baggage)),
+                    new Items(), Map.of());
         }
     }
 }
