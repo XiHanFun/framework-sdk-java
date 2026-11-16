@@ -7,20 +7,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * W3C Trace Context 的 {@code traceparent}：{@code version-traceid-spanid-flags}。
+ * W3C Trace Context 的 {@code traceparent}：{@code 00-traceid-spanid-flags}（RFC-0003 规则 7，ADR-0235）。
  *
- * <p>是否采样只看标志的最低位（W3C 的 {@code sampled}），其余位原样保留、不解释（RFC-0003 规则 7，ADR-0233）。
+ * <p>只认版本 {@code 00} 与小写十六进制，trace-id 或 parent-id 全零不合法；是否采样只看标志的最低位，其余位不进上下文；
+ * 写出时版本是 {@code 00}，标志只写采样位，即 {@code 00} 或 {@code 01}。
  *
  * @param traceId 追踪 ID，32 位小写十六进制，不能全为零
  * @param spanId Span ID（parent-id），16 位小写十六进制，不能全为零
- * @param flags trace-flags，0 到 255
+ * @param sampled 是否采样
  */
-public record TraceParent(String traceId, String spanId, int flags) {
-    /** 采样位。 */
-    public static final int SAMPLED = 0x01;
-
-    /** traceparent 文法：版本、追踪 ID、Span ID 与标志，都是小写十六进制。 */
-    private static final Pattern PATTERN = Pattern.compile("^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$");
+public record TraceParent(String traceId, String spanId, boolean sampled) {
+    /** traceparent 文法：只认版本 00，追踪 ID、Span ID 与标志都是小写十六进制，没有多余的段。 */
+    private static final Pattern PATTERN = Pattern.compile("^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$");
 
     private static final Pattern TRACE_ID = Pattern.compile("^[0-9a-f]{32}$");
     private static final Pattern SPAN_ID = Pattern.compile("^[0-9a-f]{16}$");
@@ -33,8 +31,8 @@ public record TraceParent(String traceId, String spanId, int flags) {
      *
      * @param traceId 追踪 ID
      * @param spanId Span ID
-     * @param flags trace-flags
-     * @throws IllegalArgumentException ID 不合格式或全为零，或标志不在 0 到 255 之间
+     * @param sampled 是否采样
+     * @throws IllegalArgumentException ID 不合格式或全为零
      */
     public TraceParent {
         if (!isTraceId(traceId)) {
@@ -43,18 +41,6 @@ public record TraceParent(String traceId, String spanId, int flags) {
         if (!isSpanId(spanId)) {
             throw new IllegalArgumentException("The span ID '" + spanId + "' must be 16 lowercase hexadecimal digits, not all zero.");
         }
-        if (flags < 0 || flags > 0xFF) {
-            throw new IllegalArgumentException("The trace flags must be a byte, got " + flags + ".");
-        }
-    }
-
-    /**
-     * 判断是否采样：标志的最低位。
-     *
-     * @return 采样时为真
-     */
-    public boolean sampled() {
-        return (flags & SAMPLED) == SAMPLED;
     }
 
     /**
@@ -68,11 +54,12 @@ public record TraceParent(String traceId, String spanId, int flags) {
             return Optional.empty();
         }
         Matcher match = PATTERN.matcher(text);
-        if (!match.matches() || ZERO_TRACE_ID.equals(match.group(2)) || ZERO_SPAN_ID.equals(match.group(3))) {
+        if (!match.matches() || ZERO_TRACE_ID.equals(match.group(1)) || ZERO_SPAN_ID.equals(match.group(2))) {
             return Optional.empty();
         }
-        // 标志整字节保留：采样位是最低位，其他位留给以后的标志，原样传下去
-        return Optional.of(new TraceParent(match.group(2), match.group(3), Integer.parseInt(match.group(4), 16)));
+        // 只取采样位（标志的最低位），其余位不进上下文
+        boolean sampled = (Integer.parseInt(match.group(3), 16) & 0x01) == 0x01;
+        return Optional.of(new TraceParent(match.group(1), match.group(2), sampled));
     }
 
     /**
@@ -120,7 +107,7 @@ public record TraceParent(String traceId, String spanId, int flags) {
      */
     @Override
     public String toString() {
-        return "00-" + traceId + "-" + spanId + "-" + HEX[flags >> 4] + HEX[flags & 0xF];
+        return "00-" + traceId + "-" + spanId + "-" + (sampled ? "01" : "00");
     }
 
     /**

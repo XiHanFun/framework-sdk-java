@@ -89,17 +89,41 @@ class ContextTest {
         Context traced = Context.builder().trace("0af7651916cd43dd8448eb211c80319c", "b7ad6b7169203331").build();
         assertEquals(Optional.of(true), traced.sampled(), "a trace without flags counts as sampled upstream");
         assertTrue(TraceParent.parse("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03").orElseThrow().sampled(), "the sampled bit");
-        // 标志的其余位原样保留、不解释（RFC-0003 规则 7）
-        for (String flags : List.of("03", "02", "ff", "00")) {
-            Context upstream = Context.builder().traceParent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-" + flags).build();
-            assertEquals("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-" + flags, upstream.traceParent(), flags);
-            assertEquals(Optional.of(Integer.parseInt(flags, 16)), upstream.traceFlags());
-            assertEquals(Optional.of((Integer.parseInt(flags, 16) & 1) == 1), upstream.sampled());
-        }
+        // 其余位不进上下文，写出时只写采样位（RFC-0003 规则 7，ADR-0235）
+        Context upstream = Context.builder().traceParent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-03").build();
+        assertEquals("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", upstream.traceParent());
         assertTrue(Context.background().traceParent().endsWith("-01"), "a root without flags writes 01");
-        assertEquals(Optional.empty(), Context.background().traceFlags());
-        assertThrows(IllegalArgumentException.class, () -> new TraceParent("0af7651916cd43dd8448eb211c80319c", "b7ad6b7169203331", 256));
         assertThrows(IllegalArgumentException.class, () -> Context.builder().trace("xyz", "b7ad6b7169203331"));
+    }
+
+    @Test
+    void traceContextFollowsTheVectors() throws Exception {
+        var vectors = Vectors.read("primitives/trace-context.json");
+        for (var valid : vectors.get("parse").get("valid")) {
+            String text = valid.get("text").textValue();
+            TraceParent parsed = TraceParent.parse(text).orElseThrow(() -> new AssertionError(text + " must parse"));
+            assertEquals(valid.get("traceId").textValue(), parsed.traceId(), text);
+            assertEquals(valid.get("spanId").textValue(), parsed.spanId(), text);
+            assertEquals(valid.get("sampled").booleanValue(), parsed.sampled(), text);
+            Context context = Context.builder().traceParent(text).build();
+            assertEquals(Optional.of(parsed.sampled()), context.sampled());
+            assertEquals(parsed.toString(), context.traceParent(), "the context writes back only the sampled bit");
+        }
+        for (String text : Vectors.strings(vectors.get("parse").get("invalid"))) {
+            assertEquals(Optional.empty(), TraceParent.parse(text), text + " must not parse");
+            assertEquals(Optional.empty(), Context.builder().traceParent(text).build().sampled(), "an invalid traceparent counts as none: " + text);
+        }
+        for (var format : vectors.get("format")) {
+            String traceId = format.get("traceId").textValue();
+            String spanId = format.get("spanId").textValue();
+            String expected = format.get("text").textValue();
+            if (format.get("sampled").isNull()) {
+                // 上下文没有标志：只给追踪 ID 的创建方按上游已采样处理，没有上游时写 01
+                assertEquals(expected, Context.builder().build().traceParent().replaceFirst("^00-[0-9a-f]{32}-[0-9a-f]{16}", "00-" + traceId + "-" + spanId));
+            } else {
+                assertEquals(expected, new TraceParent(traceId, spanId, format.get("sampled").booleanValue()).toString());
+            }
+        }
     }
 
     @Test
