@@ -194,6 +194,27 @@ class PipelineBuilderTest {
     }
 
     @Test
+    void registrationsAndConstraintsAreUnbounded() {
+        // 与 .NET 的 PipelineBuilder 一样不设上限：1100 个中间件与 4396 条约束（超过上一版的 1024 与 4096）照常排序、构建与执行
+        PipelineBuilder builder = new PipelineBuilder();
+        int count = 1_100;
+        for (int index = 0; index < count; index++) {
+            builder.useNamedInstance("m" + index, passing("Many"), PipelineStage.VALIDATE, Placement.END, PipelineBuilder.APP_OWNER);
+        }
+        for (int round = 0; round < 4; round++) {
+            for (int index = 1; index < count; index++) {
+                // 每个都排在前一个之前：顺序整体倒过来
+                builder.before("m" + index, "m" + (index - 1));
+            }
+        }
+        List<MiddlewareDescriptor> ordered = builder.describe();
+        assertEquals(count, ordered.size());
+        assertEquals(Optional.of("m" + (count - 1)), ordered.get(0).instance());
+        assertEquals(Optional.of("m0"), ordered.get(count - 1).instance());
+        assertTrue(builder.build(context -> Result.success()).invoke(Context.background()).isOk());
+    }
+
+    @Test
     void copiesAreIndependent() {
         PipelineBuilder original = new PipelineBuilder()
                 .useAt(passing("A"), PipelineStage.VALIDATE)

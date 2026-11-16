@@ -26,12 +26,6 @@ public final class PipelineBuilder {
     /** 应用自己登记的中间件的归属。 */
     public static final String APP_OWNER = "app";
 
-    /** 一个管道最多的中间件数。 */
-    public static final int CAPACITY = 1024;
-
-    /** 一个管道最多的顺序约束数。 */
-    public static final int CONSTRAINT_CAPACITY = 4096;
-
     /** 打印时阶段名所占的列宽（不含其后的空格）：阶段名左对齐，加一个空格共 13 列。 */
     private static final int STAGE_COLUMN = 12;
 
@@ -243,9 +237,6 @@ public final class PipelineBuilder {
                             : "Middleware '" + name + "' named '" + instance + "' is already registered; instance names must be unique within a type.");
                 }
             }
-            if (registrations.size() >= CAPACITY) {
-                throw registrationError("The pipeline cannot hold more than " + CAPACITY + " middleware.");
-            }
             registrations.add(new Registration(middleware, descriptor, sequence++));
         } finally {
             lock.unlock();
@@ -262,9 +253,6 @@ public final class PipelineBuilder {
             Registration found = findByName(subject);
             if (found == null) {
                 throw registrationError("Middleware '" + subject + "' is not registered, so no ordering constraint can be declared for it.");
-            }
-            if (constraints.size() >= CONSTRAINT_CAPACITY) {
-                throw registrationError("The pipeline cannot hold more than " + CONSTRAINT_CAPACITY + " ordering constraints.");
             }
             constraints.add(new Constraint(found, target, before));
         } finally {

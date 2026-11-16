@@ -85,7 +85,7 @@ OperationResponse response = invoker.invoke(context, OperationRequest.of("orders
 
 **可空性。** 公开成员不接受也不返回 `null`：可能没有的值以 `Optional` 返回（`findBaggage`、`find`、`tenant()`），需要线上编码的数据字段用 `Maybe`（编码为值或 `null`，对象里缺这个字段也解码为无值），集合没有时是空集合；参数传 `null` 抛 `NullPointerException`。
 
-**有界。** 对象袋最多 1024 个条目、Baggage 最多 180 个、按派生的值最多 256 个键、管道最多 1024 个中间件与 4096 条约束、操作登记表 10000 个操作，超出是编程或配置错误。
+**有界。** 对象袋最多 1024 个条目、Baggage 最多 180 个、按派生的值最多 256 个键、操作登记表 10000 个操作，超出是编程或配置错误。管道的中间件与顺序约束不设上限，与 .NET 的 `PipelineBuilder` 一致：它们由代码在启动时登记，不来自外部输入（上一版限 1024 个中间件与 4096 条约束，已撤回）。
 
 ## 开发
 
