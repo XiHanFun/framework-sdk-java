@@ -106,8 +106,7 @@ class OperationInvokerTest {
         assertEquals(Optional.of(new OrderCreated("o-c2", 3)), created.value());
         Result<String> mismatch = invoker.invoke(Context.background(), "orders.create", new CreateOrder(3), String.class);
         assertEquals(OperationErrors.TYPE_MISMATCH, mismatch.error().orElseThrow().code());
-        assertEquals(Map.of("id", "orders.create", "expected", "CreateOrder -> OrderCreated", "actual", "CreateOrder -> String"),
-                mismatch.error().orElseThrow().details());
+        assertEquals(Map.of("id", "orders.create"), mismatch.error().orElseThrow().details(), "type names are language specific (ADR-0236)");
         Result<OrderCreated> wrongRequest = invoker.invoke(Context.background(), "orders.create", "not a request", OrderCreated.class);
         assertEquals(OperationErrors.TYPE_MISMATCH, wrongRequest.error().orElseThrow().code());
         Result<Object> widened = invoker.invoke(Context.background(), "orders.create", new CreateOrder(1), Object.class);

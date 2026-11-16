@@ -109,9 +109,8 @@ public final class OperationInvoker {
         OperationDescriptor descriptor = found.get();
         // 请求按实例判断、响应按可赋值判断：登记的类型的子类实例与它的父类型都算相符，擦除后的泛型参数不参与判断
         if (!descriptor.requestType().isInstance(request) || !responseType.isAssignableFrom(descriptor.responseType())) {
-            return Result.fail(Error.validation(OperationErrors.TYPE_MISMATCH, OperationMessages.TYPE_MISMATCH, Map.of("id", id,
-                    "expected", descriptor.requestType().getSimpleName() + " -> " + descriptor.responseType().getSimpleName(),
-                    "actual", request.getClass().getSimpleName() + " -> " + responseType.getSimpleName())));
+            // 只带 id：类型名是实现语言的，各语言写不出同样的参数（ADR-0236）
+            return Result.fail(Error.validation(OperationErrors.TYPE_MISMATCH, OperationMessages.TYPE_MISMATCH, Map.of("id", id)));
         }
         InvocationScope scope = new InvocationScope(descriptor, OperationRequest.of(id), request);
         Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope), id);

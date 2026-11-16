@@ -25,7 +25,7 @@ public final class KernelMessages {
             Map.entry("kernel.invocation.unhandled_exception", "An unhandled exception occurred during the invocation."),
             Map.entry("kernel.operation.unknown", "Operation '{id}' is not registered."),
             Map.entry("kernel.operation.invalid_payload", "The payload of operation '{id}' is not valid: {reason}"),
-            Map.entry("kernel.operation.type_mismatch", "Operation '{id}' handles '{expected}', but '{actual}' was supplied."),
+            Map.entry("kernel.operation.type_mismatch", "Operation '{id}' was invoked with request or response types that do not match its registration."),
             Map.entry("kernel.operation.no_response", "Operation '{id}' completed without producing a response."),
             Map.entry("kernel.operation.duplicate", "Operation '{id}' is already registered by '{owner}'."),
             Map.entry("kernel.operation.registry_full", "The operation registry has reached its capacity of {capacity}."));

@@ -10,7 +10,7 @@ public final class OperationMessages {
     /** 操作载荷不合法；参数 {@code id} 与 {@code reason}，{@code reason} 只写 JSON 路径，如 {@code $.quantity}。 */
     public static final String INVALID_PAYLOAD = "kernel.operation.invalid_payload";
 
-    /** 类型化调用的类型与登记不符；参数 {@code id}、{@code expected}、{@code actual}，类型写成 {@code 请求 -> 响应}。 */
+    /** 类型化调用的类型与登记不符；参数只有 {@code id}（ADR-0236）。 */
     public static final String TYPE_MISMATCH = "kernel.operation.type_mismatch";
 
     /** 管道成功结束却没有执行到操作、没有响应；参数 {@code id}。 */
