@@ -1,6 +1,7 @@
 package com.xihanfun.framework.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -8,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import com.xihanfun.framework.invocation.CancellableContext;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.pipeline.Middleware;
 import com.xihanfun.framework.pipeline.PipelineBuilder;
@@ -18,13 +20,14 @@ import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
 import java.io.Serial;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
- * 载荷的文本与响应的编码（RFC-0011 规则 2、规则 10「编码」，ADR-0236）。
+ * 载荷的文本与响应的编码（RFC-0011 规则 2、规则 10「编码」，ADR-0236），以及取消只经令牌通知（RFC-0003 规则 1）。
  */
 class ResponseEncodingTest {
     /** 任意 JSON 的成员原样往返。 */
@@ -103,6 +106,39 @@ class ResponseEncodingTest {
         assertEquals("ORDERS_UNEXPECTED_001", refused.inner().orElseThrow().code(), "the framework error goes into inner");
         // 类型化入口不编码：NaN 原样交给调用方
         assertTrue(Double.isNaN(invoker.invoke(Context.background(), "readings.take", Unit.VALUE, Reading.class).value().orElseThrow().value()));
+    }
+
+    @Test
+    void cancellationOnlySignalsThroughTheTokens() throws InterruptedException {
+        // 取消与截止时间只经令牌通知，不强行中止处理器：令牌触发之后处理器照常返回的结果就是调用的结果（RFC-0003 规则 1，ADR-0236）
+        OperationRegistry registry = new OperationRegistry();
+        registry.add(OperationContract.of("jobs.finish"), Unit.class, String.class, (context, request) -> {
+            try {
+                assertTrue(context.awaitCancellation(Duration.ofSeconds(5)), "the token fires");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return Result.ok("interrupted");
+            }
+            return Result.ok("finished");
+        });
+        OperationInvoker invoker = invoker(registry, new PipelineBuilder());
+        try (CancellableContext timed = Context.background().withTimeout(Duration.ofMillis(50))) {
+            OperationResponse response = invoker.invoke(timed.context(), OperationRequest.of("jobs.finish"));
+            assertEquals(Optional.of("\"finished\""), response.payloadText(), "the call ends with the handler's own result");
+            assertFalse(Thread.currentThread().isInterrupted(), "the thread is not interrupted");
+        }
+        try (CancellableContext cancelled = Context.background().withCancellation()) {
+            Thread canceller = Thread.ofVirtual().start(() -> {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                cancelled.cancel();
+            });
+            assertEquals(Optional.of("\"finished\""), invoker.invoke(cancelled.context(), OperationRequest.of("jobs.finish")).payloadText());
+            canceller.join();
+        }
     }
 
     @Test
