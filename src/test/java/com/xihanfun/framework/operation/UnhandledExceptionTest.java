@@ -123,6 +123,73 @@ class UnhandledExceptionTest {
         assertEquals(1, authorized.get());
     }
 
+    /** 等到截止令牌触发（{@link Context#cancellation()} 报超时），最多 5 秒；外部令牌先触发时仍接着等。 */
+    private static void awaitDeadline(Context context) {
+        long until = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!context.cancellation().map(Error::code).filter(InvocationErrors.DEADLINE_EXCEEDED::equals).isPresent() && System.nanoTime() < until) {
+            try {
+                context.awaitCancellation(java.time.Duration.ofMillis(10));
+                Thread.sleep(5);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    @Test
+    void aCancellationResultAfterTheDeadlineFiredIsATimeout() {
+        // RFC-0003 规则 1（ADR-0236）：下游把取消写成结果，截止令牌已触发即改报超时；只有调用方取消时保持取消；两者都触发也是超时
+        OperationInvoker invoker = invoker((context, request) -> {
+            awaitDeadline(context);
+            return Result.fail(InvocationErrors.cancelled());
+        }, new PipelineBuilder());
+        Error timedOut = xgi(invoker, Context.builder().timeout(java.time.Duration.ofMillis(50)).build());
+        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, timedOut.code());
+        assertEquals(Optional.of("kernel.invocation.deadline_exceeded"), timedOut.messageKey());
+        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, invoker.invoke(Context.builder().timeout(java.time.Duration.ofMillis(50)).build(), "jobs.run",
+                Unit.VALUE, Unit.class).error().orElseThrow().code(), "the typed entry follows the same rule");
+
+        OperationInvoker cancelling = invoker((context, request) -> Result.fail(InvocationErrors.cancelled()), new PipelineBuilder());
+        try (CancellableContext scope = Context.background().withCancellation()) {
+            scope.cancel();
+            Error cancelled = xgi(cancelling, scope.context());
+            assertEquals(InvocationErrors.CANCELLED, cancelled.code(), "only the caller cancelled");
+            assertEquals(Optional.of("kernel.invocation.cancelled"), cancelled.messageKey());
+        }
+        try (CancellableContext scope = Context.builder().timeout(java.time.Duration.ofMillis(50)).build().withCancellation()) {
+            scope.cancel();
+            Error both = xgi(invoker, scope.context());
+            assertEquals(InvocationErrors.DEADLINE_EXCEEDED, both.code(), "the deadline fired too: a timeout");
+            assertEquals(Optional.of("kernel.invocation.deadline_exceeded"), both.messageKey());
+        }
+        // 截止时间没到、调用方也没取消时，写成取消的结果原样返回
+        assertEquals(InvocationErrors.CANCELLED, xgi(cancelling, Context.builder().timeout(java.time.Duration.ofSeconds(30)).build()).code());
+        // 其他失败不改写
+        Error denied = Error.denied("ORDERS_DENIED_001", "orders.denied");
+        OperationInvoker denying = invoker((context, request) -> {
+            awaitDeadline(context);
+            return Result.fail(denied);
+        }, new PipelineBuilder());
+        assertEquals(denied, xgi(denying, Context.builder().timeout(java.time.Duration.ofMillis(50)).build()));
+    }
+
+    @Test
+    void aCancellationThrownAfterTheDeadlineFiredIsATimeout() {
+        // 抛出路径同一规则：Observe 阶段的内置步骤按令牌归因，截止令牌已触发即超时
+        OperationInvoker invoker = invoker((context, request) -> {
+            awaitDeadline(context);
+            throw new CancellationException("stopped");
+        }, new PipelineBuilder());
+        Error timedOut = xgi(invoker, Context.builder().timeout(java.time.Duration.ofMillis(50)).build());
+        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, timedOut.code());
+        assertEquals(Optional.of("kernel.invocation.deadline_exceeded"), timedOut.messageKey());
+        try (CancellableContext scope = Context.builder().timeout(java.time.Duration.ofMillis(50)).build().withCancellation()) {
+            scope.cancel();
+            assertEquals(InvocationErrors.DEADLINE_EXCEEDED, xgi(invoker, scope.context()).code(), "both fired: a timeout");
+        }
+    }
+
     @Test
     void exceptionsBeforeTheObserveStepReachTheCaller() {
         // Observe 阶段的内置步骤只接住排在它之后的异常：Ingress 阶段与 Observe 阶段开头归属排在 xihan.kernel.core 之前的照常抛出
