@@ -12,7 +12,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>归因只看令牌（RFC-0004「Resilience 阶段」，ADR-0095）：截止令牌已触发即超时，不论外部令牌是否也已触发；
  * 截止令牌没有触发、外部令牌已触发即取消。两个令牌各自独立地置位，所以先被调用方取消、随后又到了截止时间的调用，
- * 在截止令牌触发之后报超时，与 .NET 的定时取消一致。
+ * 在截止令牌触发之后报超时（RFC-0003 规则 1）。
  */
 final class CancellationState {
     /** 永不取消、没有截止时间：{@link Context#background()} 的状态。 */

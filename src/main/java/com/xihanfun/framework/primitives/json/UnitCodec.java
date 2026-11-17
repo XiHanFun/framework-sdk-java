@@ -37,7 +37,7 @@ final class UnitCodec {
     }
 
     /**
-     * 接受任意 JSON 对象（成员忽略，与 Go 解码 {@code struct{}} 一致），其他值拒绝。
+     * 接受任意 JSON 对象（未知成员忽略，与 RFC-0011 规则 2 的载荷读取一致），其他值拒绝。
      */
     static final class Deserializer extends StdDeserializer<Unit> {
         @Serial

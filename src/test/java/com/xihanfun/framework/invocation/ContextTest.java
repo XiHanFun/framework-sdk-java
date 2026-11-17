@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 /**
- * 调用上下文：逐项移植自 Go SDK 的 context_test.go，另测取消的归因、回调与并发。
+ * 调用上下文（RFC-0003）：追踪、Baggage 的入口与派生、截止时间与取消的归因、回调与并发。
  */
 class ContextTest {
     @Test

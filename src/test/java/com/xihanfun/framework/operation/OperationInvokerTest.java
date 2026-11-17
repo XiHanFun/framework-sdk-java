@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
- * 操作的登记与执行：逐项移植自 Go SDK 的 operation_test.go，另测容量、载荷的错误路径、嵌套与并发调用。
+ * 操作的登记与执行（RFC-0011）：登记与容量、XGI 与类型化入口、载荷的错误路径、嵌套与并发调用。
  */
 class OperationInvokerTest {
     /** 请求。 */

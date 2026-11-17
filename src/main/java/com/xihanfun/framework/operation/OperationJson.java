@@ -48,7 +48,7 @@ public final class OperationJson {
 
     /**
      * 创建登记表缺省使用的 {@link ObjectMapper}：注册原语编码（{@code Maybe}、{@code TypedId}、{@code Result} 等），
-     * 忽略请求里的未知字段（与 .NET 的缺省一致），类型不符一律失败——不把字符串转成数字、不把小数截成整数、
+     * 忽略请求里的未知字段（RFC-0011 规则 2），类型不符一律失败——不把字符串转成数字、不把小数截成整数、
      * 不把数字或布尔转成字符串。
      *
      * <p>解码时报错的先后与 {@code null} 的规则由 {@link RequestShape} 在反序列化之前按文本顺序核对，不靠这份配置；

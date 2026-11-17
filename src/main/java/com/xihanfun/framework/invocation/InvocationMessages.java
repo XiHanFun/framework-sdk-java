@@ -7,7 +7,7 @@ public final class InvocationMessages {
     /** 调用超过截止时间：截止时间在调用途中到达。 */
     public static final String DEADLINE_EXCEEDED = "kernel.invocation.deadline_exceeded";
 
-    /** 调用开始时截止时间已过：调用器在第一个中间件之前核对。 */
+    /** 调用开始时截止时间已过：调用器在 Resilience 阶段的内置步骤里核对。 */
     public static final String DEADLINE_BEFORE_START = "kernel.invocation.deadline_before_start";
 
     /** 处理器或中间件抛出了未处理的异常；没有参数。 */

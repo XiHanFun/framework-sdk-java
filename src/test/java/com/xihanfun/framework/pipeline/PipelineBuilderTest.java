@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
 /**
- * 管道的排序、打印与执行：逐项移植自 Go SDK 的 pipeline_test.go，另测按名字的约束、构建快照与并发执行。
+ * 管道的排序、打印与执行（RFC-0004）：阶段与位置、按名字的约束、构建快照与并发执行。
  */
 class PipelineBuilderTest {
     private static Middleware recording(String name, List<String> log) {

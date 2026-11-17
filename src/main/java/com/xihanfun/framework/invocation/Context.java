@@ -133,7 +133,7 @@ public final class Context {
     /**
      * 把取消与超时翻译成原语层错误。
      *
-     * <p>建上下文时不判断「开始前已超时」：那由调用器在第一个中间件之前按时钟核对（RFC-0011 规则 10，ADR-0235）。
+     * <p>建上下文时不判断「开始前已超时」：那由调用器在 Resilience 阶段的内置步骤里按时钟核对（RFC-0011 规则 10，ADR-0236）。
      *
      * @return 截止令牌已触发为 {@code KERNEL_TIMEOUT_001} + {@value InvocationMessages#DEADLINE_EXCEEDED}，只有外部取消为
      *     {@code KERNEL_CANCELLED_001}；未取消时为空

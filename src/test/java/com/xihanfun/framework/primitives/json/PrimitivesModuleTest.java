@@ -21,7 +21,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * 线上编码：与 Go SDK 的 primitives_test.go 逐字一致的 JSON。
+ * 线上编码（RFC-0001「Result」）：写出的 JSON 逐字核对，读取时拒绝不合编码的写法。
  */
 class PrimitivesModuleTest {
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new PrimitivesModule());

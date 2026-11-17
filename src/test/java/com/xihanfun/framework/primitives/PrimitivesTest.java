@@ -19,7 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * 原语的语义：文法按一致性向量核对，其余逐项移植自 Go SDK 的 primitives_test.go。
+ * 原语的语义（RFC-0001、RFC-0010）：文法按一致性向量核对，其余核对错误、结果、可选值、类型化标识与消息的行为。
  */
 class PrimitivesTest {
     @AfterEach

@@ -28,10 +28,8 @@ import java.io.Serial;
  * <p>解码按 RFC-0001「Result」的规则（ADR-0233，向量 {@code conformance/vectors/primitives/wire-encoding.json}）：
  * 不合规则的以 Jackson 的 {@code MismatchedInputException} 拒绝，不静默补默认值；Result 与 Error 的未知成员忽略。
  *
- * <p>Jackson 是本模块的可选依赖，不能以 {@code requires transitive} 强加给下游；用编码的模块自己 {@code requires com.fasterxml.jackson.databind}。
+ * <p>本类型继承 Jackson 的模块类型，模块描述以 {@code requires transitive com.fasterxml.jackson.databind} 把 Jackson 交给使用者。
  */
-// 基类来自可选依赖：下游自己读 Jackson，exports 检查的「未经 transitive 导出」在这里是有意的
-@SuppressWarnings("exports")
 public final class PrimitivesModule extends SimpleModule {
     @Serial
     private static final long serialVersionUID = 1L;

@@ -23,7 +23,7 @@ final class Deadlines {
         try {
             nanos = Duration.between(Instant.now(), deadline).toNanos();
         } catch (ArithmeticException tooFar) {
-            // 远到纳秒计数表示不了（约 292 年）：调用期间不会到期，不起定时器（与 .NET 超出定时范围时的处理一致）
+            // 远到纳秒计数表示不了（约 292 年）：调用期间不会到期，不起定时器，当作没有截止时间
             return;
         }
         if (nanos <= 0) {

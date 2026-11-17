@@ -16,8 +16,6 @@ import java.util.Optional;
  * <p>{@link PrimitivesModule} 的解码器在词法单元上核对重复成员、嵌套层数与孤立的代理项，但 BOM、非法 UTF-8、注释与尾逗号这类文本层面的问题，
  * Jackson 的解析器或者放过、或者随使用者的配置而定，解码器看不见；从线上收到的文本应经这里读。
  */
-// 参数与返回值来自可选依赖 Jackson：下游自己读 Jackson
-@SuppressWarnings("exports")
 public final class PrimitivesJson {
     private PrimitivesJson() {
     }

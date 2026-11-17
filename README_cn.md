@@ -22,7 +22,7 @@
 
 </div>
 
-[XiHan Spec](https://github.com/XiHanFun/framework-spec) 的 Java 实现：原语层、清单、调用上下文、管道与操作契约。用它可以把同一套原语用在 JVM 应用里；下一轮加上进程外插件运行时后，也能写在 .NET 宿主（参考实现 [XiHan.Framework](https://github.com/XiHanFun/XiHan.Framework)）里运行的 Java 插件。规范以 submodule 放在 `spec/`，一致性由规范仓库的一致性向量验证；形状与语义的参照是 [framework-sdk-go](https://github.com/XiHanFun/framework-sdk-go)。
+[XiHan Spec](https://github.com/XiHanFun/framework-spec) 的 Java 实现：原语层、清单、调用上下文、管道与操作契约。用它可以把与 .NET 宿主（参考实现 [XiHan.Framework](https://github.com/XiHanFun/XiHan.Framework)）相同的原语用在 JVM 应用里。规范以 submodule 放在 `spec/`，一致性由规范仓库的一致性向量验证。
 
 ## 模块
 
@@ -91,7 +91,7 @@ OperationResponse response = invoker.invoke(context, OperationRequest.of("orders
 - **取消只经令牌**：调用器与内置步骤不中断线程、不取消 future，只让上下文的令牌触发；令牌触发之后处理器照常返回结果的，调用以那个结果结束。处理器要尽早结束时自己看 `context.cancellation()`、`onCancelled` 或 `awaitCancellation`。
 - **载荷解码**：先过共同检查（语法错误写 `$`，重复成员写第一处重复的路径，先于一切类型问题）；空载荷等价于 `{}`，只有空白是语法错误（上一版当作 `{}`）；然后按请求类型以文本顺序核对（`RequestShape`，不靠 Jackson 的读取顺序）：成员名区分大小写、未知成员忽略、数字不从字符串读、整数不接受 `1.0` 与 `1e2`、超出类型范围即不符、浮点接受整数写法且 1e400 上溢为无穷、1e-400 为 0；必填成员缺少时在所在对象结束时报该对象的路径。载荷的文本按 JSON 值比较，空白、转义与数字的写法不是契约；任意 JSON 类型的成员（`JsonNode`、`Object`）原样保留读到的值：超出双精度的整数精确，`2.0` 与 `2`、`-0.0` 与 `0` 分得开，`1e400`、`1e-400` 这类双精度表示不了的数保留原文的精确十进制，写回时 JSON 值相等，不变成 `null`、无穷或 0。`reason` 只写路径：载荷是 `null`、不是对象或根上就不合时写 `$`；成员名含 `.`、空格、`'`、`/`、`"`、`[`、`]`、`(`、`)`、`\`、制表、换行、回车、换页、退格、U+0085、U+2028、U+2029 时写 `$['名字']`，其余写 `$.名字`。
 - **清单的读取**：按 JSON 文本 → 字面量 `null` → 按 Schema 逐项核对 → 跨字段约束的顺序，每一步只报第一处问题，错误码都是 `KERNEL_CAPABILITY_006`（上一版是 `PRIMITIVES_VALIDATION_001` 加英文消息）：`kernel.manifest.invalid_json`（`reason` 是 `$` 或第一处重复的路径）、`kernel.manifest.empty`（根是 `null`，没有参数）、`kernel.manifest.invalid`（`reason` 是第一处问题的路径：成员按文本顺序，每个成员依次查 Schema 之外 → `null` → 类型 → 取值，对象查完后再按 `required` 的顺序查缺少的成员）；跨字段约束按 `primitives.manifest.isolation_required` → `isolation_not_allowed` → `duplicate_provides` → `duplicate_requires` → `duplicate_bindings` 的顺序，参数只有 `id`。`ManifestJson.read(byte[])` 不跳过 BOM；`readFile` 按 UTF-8 读并跳过开头的 UTF-8 BOM，文件不存在为 `kernel.manifest.file_missing`（参数 `path`，以前抛 `IOException`）。接口版本不带前导零、不超过 2147483647，只有依赖的版本可带一个 `^`；中间件名非空，`contributes.health` 按 `^[a-z][a-z0-9.-]*$` 核对，`contributes.permissions` 重复时报第二次出现的项；写了空数组的 `activation` 不合法。非 Wasm 插件贡献中间件交给宿主在发现时拒绝，读取与构建清单不再核对（与 .NET 一致）。`Manifest.Builder.build()` 的跨字段约束带同样的消息键与 `id`，错误码是 `PRIMITIVES_VALIDATION_001`。
-- **清单的写出**：`ManifestJson.write` 的排版照 RFC-0002「写出」逐字固定：两个空格缩进、LF、末尾不换行、`": "`；`$schema` 总写 `https://spec.xihanfun.com/manifest/v1.json`，列表总写（空列表写 `[]`），`role` 缺省写 `provider`、`activation` 缺省写 `["onStartup"]`，依赖总写 `optional`、绑定总写 `required`、中间件总写 `before` / `after`，`contributes` 总写；字符串只转义 `"`、`\`、控制字符与孤立的代理项（`<`、`&`、U+2028 与非 ASCII 原样）。上一版与 Go SDK 逐字节相同、省略缺省值并转义 `<>&`。`Manifest` 按生效的值比较（不看 `$schema`，没写的角色、激活事件、贡献点与绑定的 `required` 按缺省），写出的清单再读一遍与原来的相等。
+- **清单的写出**：`ManifestJson.write` 的排版照 RFC-0002「写出」逐字固定：两个空格缩进、LF、末尾不换行、`": "`；`$schema` 总写 `https://spec.xihanfun.com/manifest/v1.json`，列表总写（空列表写 `[]`），`role` 缺省写 `provider`、`activation` 缺省写 `["onStartup"]`，依赖总写 `optional`、绑定总写 `required`、中间件总写 `before` / `after`，`contributes` 总写；字符串只转义 `"`、`\`、控制字符与孤立的代理项（`<`、`&`、U+2028 与非 ASCII 原样）。上一版省略缺省值并转义 `<>&`。`Manifest` 按生效的值比较（不看 `$schema`，没写的角色、激活事件、贡献点与绑定的 `required` 按缺省），写出的清单再读一遍与原来的相等。
 - **文法**：规范的正则都按整串匹配，结尾的换行不例外（`xihan.tenant\n`、带换行的 `traceparent` 不通过）；Java 一律用 `Matcher.matches()`。能力依赖的版本不接受前导零、`+`、空白与超过 2147483647 的值。
 - **Baggage 值**：已登记键的值要非空、按 UTF-16 码元计最多 256、不含 U+0000–U+001F 与 U+007F–U+009F。外部输入 `Context.builder().baggage(…)` 丢弃不合的成员、已有的同名值保留；程序内派生 `withBaggage` 给已登记的键一个不合的值抛 `IllegalArgumentException`（上一版是去掉这个键）。`xihan.idempotency-key` 两种情形都例外。
 - **追踪**：`traceparent` 只认 `^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`、标识不能全零，不合法的当作没给；只取采样位，写出只写 `00` / `01`（上一版整字节保留标志、有 `traceFlags()`，已撤回）；没有上游时写 `01`。
@@ -109,7 +109,7 @@ Java 的写法与规范的对应：
 
 ## 设计
 
-**并发：虚拟线程上的同步签名，不用 `CompletableFuture`。** 中间件、处理器与调用器都是同步方法（`Result<Unit> invoke(Context, Step)`、`Result<Res> handle(Context, Req)`），按 Java 21 虚拟线程（JEP 444）设计：阻塞等待 I/O 时虚拟线程让出载体线程，不占平台线程，写法与 Go SDK 一一对应、调用栈与异常栈可读，不需要把每一层都改成回调链。下一轮的插件运行时让 grpc-java 服务端以 `Executors.newVirtualThreadPerTaskExecutor()` 执行调用即可，公开 API 不必改。为此：构建出的 `Step`、`OperationInvoker`、`OperationRegistry` 不可变或线程安全，可以被任意多个线程同时使用；`Context` 不可变、按派生传递，每次操作调用的状态随派生的上下文传递（`Context.withValue`），嵌套与并发调用互不干扰；锁一律用 `ReentrantLock`，不在 `synchronized` 里阻塞（Java 21 上 `synchronized` 会钉住虚拟线程）。
+**并发：虚拟线程上的同步签名，不用 `CompletableFuture`。** 中间件、处理器与调用器都是同步方法（`Result<Unit> invoke(Context, Step)`、`Result<Res> handle(Context, Req)`），按 Java 21 虚拟线程（JEP 444）设计：阻塞等待 I/O 时虚拟线程让出载体线程，不占平台线程，调用栈与异常栈可读，不需要把每一层都改成回调链。为此：构建出的 `Step`、`OperationInvoker`、`OperationRegistry` 不可变或线程安全，可以被任意多个线程同时使用；`Context` 不可变、按派生传递，每次操作调用的状态随派生的上下文传递（`Context.withValue`），嵌套与并发调用互不干扰；锁一律用 `ReentrantLock`，不在 `synchronized` 里阻塞（Java 21 上 `synchronized` 会钉住虚拟线程）。
 
 **取消与截止时间自己建模。** `Context` 有两个令牌：截止令牌由定时器在截止时间触发，外部令牌由 `CancellableContext.cancel()` 触发；父级取消连带子级，子级取消不影响父级。归因只看令牌（RFC-0003 规则 1、RFC-0004、ADR-0095）：截止令牌已触发即 `KERNEL_TIMEOUT_001`，不论调用方是否也已取消；只有外部令牌触发时为 `KERNEL_CANCELLED_001`。`onCancelled` 登记回调（已取消时立即执行），`awaitCancellation` 在虚拟线程上等待；`withCancellation` / `withDeadline` / `withTimeout` 返回的 `CancellableContext` 用完要关闭（try-with-resources），免得长寿命的父级积攒已结束的子级。
 
@@ -151,7 +151,7 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/roo
 | --- | --- |
 | [framework-spec](https://github.com/XiHanFun/framework-spec) | XiHan Spec：RFC、术语表、协议映射与一致性向量 |
 | [XiHan.Framework](https://github.com/XiHanFun/XiHan.Framework) | .NET 参考实现 |
-| [framework-sdk-go](https://github.com/XiHanFun/framework-sdk-go) | Go SDK，含进程外插件运行时 |
+| [framework-sdk-go](https://github.com/XiHanFun/framework-sdk-go) | Go SDK |
 | [framework-sdk-typescript](https://github.com/XiHanFun/framework-sdk-typescript) | TypeScript SDK |
 | [framework-sdk-rust](https://github.com/XiHanFun/framework-sdk-rust) | Rust SDK |
 | [framework-sdk-python](https://github.com/XiHanFun/framework-sdk-python) | Python SDK |
@@ -161,7 +161,7 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/roo
 
 欢迎提交 [Issue](https://github.com/XiHanFun/framework-sdk-java/issues) 与 Pull Request。
 
-1. 先读 framework-spec 的 README 与各 RFC，再看 framework-sdk-go 的包划分。
+1. 先读 framework-spec 的 README 与相关 RFC。
 2. 公开契约的变更不在 SDK 仓库里做：走 framework-spec 的 RFC 流程，再同步到各 SDK。
 
 ## 许可证

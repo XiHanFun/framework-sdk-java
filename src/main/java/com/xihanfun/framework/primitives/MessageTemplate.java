@@ -42,7 +42,7 @@ import java.util.regex.Pattern;
  *   <li>{@code N} / {@code Nn}：带分组符的定点小数，n 位小数，缺省 2</li>
  * </ul>
  * {@code D}、{@code F}、{@code N} 不区分大小写；不适用的值（浮点的 {@code D}、负数的 {@code X}、字符串、布尔、{@code null}、数组与对象）按无格式写出。
- * {@code F} 与 {@code N} 按值的精确十进制展开舍入，正好一半时取偶（与 .NET 一致，不同于 {@link String#format} 的一半进位）。
+ * {@code F} 与 {@code N} 按值的精确十进制展开舍入，正好一半时取偶（RFC-0010「模板」，不同于 {@link String#format} 的一半进位）。
  *
  * <p><b>区域</b>：只改变小数点与分组符（{@link #format(String, Map, String)}），取自规范的固定表，区域名不区分大小写：
  * de-DE、es-ES、pt-BR 是 {@code ,} 与 {@code .}；fr-FR 是 {@code ,} 与 U+202F；ru-RU 是 {@code ,} 与 U+00A0；en-US、zh-CN、zh-TW、ja-JP、ko-KR、
