@@ -14,3 +14,8 @@ max_line_length = 140
 
 [*.md]
 trim_trailing_whitespace = false
+
+# 生成的协议代码保持 protoc 的原样输出，CI 重新生成后逐字比对
+[src/main/java/com/xihanfun/framework/plugin/v1/*.java]
+trim_trailing_whitespace = false
+max_line_length = off

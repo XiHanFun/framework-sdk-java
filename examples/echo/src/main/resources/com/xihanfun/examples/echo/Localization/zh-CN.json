@@ -1,0 +1,13 @@
+{
+  "echoes.create.description": "回声文本，附上问候语、租户、主体与关联 ID。",
+  "echoes.create.title": "回声",
+  "echoes.relay.description": "经宿主调用另一个操作并返回它的应答。",
+  "echoes.relay.title": "转发",
+  "echojava.configuration.invalid": "XiHan:Echo 配置在 {reason} 处不合法。",
+  "echojava.host.unavailable": "宿主回调端点不可用。",
+  "echojava.relay.invalid_response": "宿主返回的 {operation} 响应不是 JSON。",
+  "echojava.relay.operation_missing": "{operation} 的请求需要操作 ID。",
+  "echojava.text.missing": "{operation} 的文本不能为空。",
+  "events.list.description": "列出投递给插件的事件 ID。",
+  "events.list.title": "收到的事件"
+}

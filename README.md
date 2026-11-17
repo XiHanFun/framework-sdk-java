@@ -22,7 +22,7 @@
 
 </div>
 
-The Java implementation of [XiHan Spec](https://github.com/XiHanFun/framework-spec): the primitives layer, manifests, the invocation context, the pipeline and operation contracts. Use it to bring the same primitives as the .NET host (the reference implementation, [XiHan.Framework](https://github.com/XiHanFun/XiHan.Framework)) into JVM applications. The spec lives in `spec/` as a submodule, and conformance is verified by the conformance vectors of the spec repository.
+The Java implementation of [XiHan Spec](https://github.com/XiHanFun/framework-spec): the primitives layer, manifests, the invocation context, the pipeline, operation contracts and the out-of-process plugin runtime. Use it to bring the same primitives as the .NET host (the reference implementation, [XiHan.Framework](https://github.com/XiHanFun/XiHan.Framework)) into JVM applications, or to write Java plugins that run in the .NET host. The spec lives in `spec/` as a submodule, and conformance is verified by the conformance vectors and the black-box runner of the spec repository.
 
 ## Modules
 
@@ -36,8 +36,36 @@ The whole SDK is a single Maven artifact, `com.xihanfun:xihan-framework`. Like t
 | `com.xihanfun.framework.invocation` | `Context`: cancellation and deadlines (attributed by token to `KERNEL_TIMEOUT_001` / `KERNEL_CANCELLED_001`, with callback registration), W3C tracing, registered baggage, the item bag `Items`, values passed by derivation | RFC-0003 |
 | `com.xihanfun.framework.pipeline` | The eleven-stage `PipelineBuilder`: `use` / `useAt` / `useNamedInstance`, `before` / `after` (type name or instance name), `describe` / `dump`, `build`; ordering rules and the error codes `KERNEL_PIPELINE_00x` | RFC-0004 |
 | `com.xihanfun.framework.operation` | `OperationContract`, `OperationSchema`, `OperationHandler<Req, Res>`, `OperationRegistry` with a capacity of 10000, `OperationInvoker` that runs through the full pipeline (XGI: JSON request and response, plus a typed entry point) | RFC-0011 |
+| `com.xihanfun.framework.plugin` | The out-of-process plugin runtime: `PluginRuntime.serve(PluginOptions)`, lifecycle hooks `PluginHooks` (configure, start, stop, health), event subscriptions `Subscription` and `EventHandler`, the message catalog handed over in the handshake `PluginCatalog`, host callbacks `Host` (`Host.Invoke` and the batched `Host.Publish`), and `PluginLogger` for JSON-line logs on stderr; the protocol code is in the unexported `com.xihanfun.framework.plugin.v1` | RFC-0017, `plugin/plugin.proto`, `plugin/handshake.md`, `plugin/lifecycle.md`, `plugin/invocation.md` |
 
-Dependency direction between packages: `operation → pipeline → invocation → primitives`, `manifest → primitives`. The only external dependency is `jackson-databind`, declared as `requires transitive` in the module descriptor.
+Dependency direction between packages: `plugin → operation → pipeline → invocation → primitives`, `plugin → manifest → primitives`. The only external dependency is `jackson-databind`, declared as `requires transitive` in the module descriptor.
+
+The plugin runtime additionally uses grpc-java and protobuf-java. They are optional dependencies of this artifact (`<optional>true</optional>`, `requires static` in the module descriptor), are not passed on to users, and are not referenced by the other packages; applications that write plugins add them themselves, with the same versions as `grpc.version` and `protobuf.version` in this repository's `pom.xml` (the generated code needs a protobuf-java no older than the one that generated it):
+
+```xml
+<dependency>
+  <groupId>io.grpc</groupId>
+  <artifactId>grpc-netty-shaded</artifactId>
+  <version>${grpc.version}</version>
+</dependency>
+<dependency>
+  <groupId>io.grpc</groupId>
+  <artifactId>grpc-protobuf</artifactId>
+  <version>${grpc.version}</version>
+</dependency>
+<dependency>
+  <groupId>io.grpc</groupId>
+  <artifactId>grpc-stub</artifactId>
+  <version>${grpc.version}</version>
+</dependency>
+<dependency>
+  <groupId>com.google.protobuf</groupId>
+  <artifactId>protobuf-java</artifactId>
+  <version>${protobuf.version}</version>
+</dependency>
+```
+
+To use the plugin runtime on the module path, these automatic modules (`io.grpc`, `io.grpc.stub`, `io.grpc.protobuf`, `io.grpc.netty.shaded`, `com.google.protobuf`, `com.google.common`) must be in the module graph: the application `requires` them itself, or uses `--add-modules`.
 
 ## Getting Started
 
@@ -77,6 +105,62 @@ OperationResponse response = invoker.invoke(context, OperationRequest.of("orders
 - Configuration errors (an invalid manifest, a pipeline cycle, a duplicate operation registration, a full registry) throw `FrameworkException` with an error code; programming errors by the caller, such as malformed arguments, throw `IllegalArgumentException`, and disallowed states throw `IllegalStateException`. Messages are English sentences, with identifiers in single quotes.
 - The JSON encoding of `Result<T>`, `Error`, `Maybe<T>` and `TypedId` follows the Result section of RFC-0001: `new ObjectMapper().registerModule(new PrimitivesModule())`. Read text received from the wire with `PrimitivesJson.read(mapper, bytes, type)`, which runs the shared JSON text check first. Lifecycle transition tables, pipeline stage order, error codes, baggage keys and values, the capability requirement grammar, the JSON text check, wire encoding, message templates, kernel errors, manifest reading and writing, payload decoding and pipeline ordering are all verified by `spec/conformance/vectors`, with expected values matching character for character.
 
+### Write a Plugin
+
+A plugin is a child process started by the host: `main` registers operations and subscriptions and hands them to `PluginRuntime.serve`, which reads the environment variables passed down by the host, listens on a local endpoint, writes one handshake line to stdout, and then serves until `Stop` completes or stdin closes:
+
+```java
+public final class GreetingPlugin {
+    record Greet(String name) { }
+    record Greeting(String text) { }
+
+    public static void main(String[] args) throws Exception {
+        OperationRegistry registry = new OperationRegistry();
+        registry.add(OperationContract.of("greetings.create").withStability(Stability.EXPERIMENTAL).withExpose(Expose.HTTP),
+                Greet.class, Greeting.class,
+                (context, request) -> Result.ok(new Greeting("hello, " + request.name())));
+
+        PluginRuntime.serve(PluginOptions.builder()
+                .operations(registry)
+                .subscribe(Subscription.of("greetings.requested"), (context, envelope, attempt) -> Result.success())
+                .catalog(PluginCatalog.load("greetings", locale -> GreetingPlugin.class.getResourceAsStream("Localization/" + locale + ".json")))
+                .build());
+    }
+}
+```
+
+The manifest `xihan.manifest.json` lives in the plugin directory. The runtime reads it from the working directory (which is the plugin directory) and hands it to the host unchanged in the handshake, and the host checks that it matches the file in the directory field by field:
+
+```json
+{
+  "$schema": "https://spec.xihanfun.com/manifest/v1.json",
+  "id": "xihan.samples.greeting",
+  "version": "0.1.0",
+  "primitives": "1",
+  "stability": "experimental",
+  "kind": "plugin",
+  "isolation": "out-of-process",
+  "contributes": { "operations": [ "greetings.create" ], "health": [ "greeting" ] },
+  "permissions": [ "capability:kernel.pipeline" ],
+  "activation": [ "onStartup" ],
+  "entry": "greeting"
+}
+```
+
+- `kind` is `plugin` and `isolation` is `out-of-process`; do not write `contributes.pipeline` (only Wasm plugins can contribute middleware), or the runtime rejects the plugin with `PLUGINS_VALIDATION_001` before it listens.
+- Every registered operation must appear in `contributes.operations`, and every health item reported by the hook must appear in `contributes.health`; to call back the host, declare `capability:kernel.pipeline` (`Host.Invoke`) or `capability:messaging.queue` (`Host.Publish`) in `permissions`.
+- `entry` is the executable relative to the plugin directory (on Windows, the host appends `.exe` when there is no extension). The `entry` of a Java plugin points to a launcher script: an executable sh script with a shebang on Unix, and a `.cmd` on Windows. The host passes on only the environment variables listed in `handshake.md` §1, and `JAVA_HOME` is not one of them, so the script writes the absolute path of `java` and the full class path, for example `exec /opt/java/bin/java -cp '/opt/greeting/lib/*' GreetingPlugin "$@"`.
+- Call back the host with `Host.of(context)` in a handler: `invoke(context, "orders.create", payload)` invokes an operation through the host's full pipeline, and `publish(context, envelopes)` publishes in a batch, with one result per item.
+
+Verify it with the black-box runner of the spec repository (requires Go; see `spec/conformance/README.md` for the options):
+
+```bash
+cd spec/conformance
+go run ./cmd/xihan-conformance plugin --dir <plugin directory> --sample 'greetings.create={"name":"hi"}'
+```
+
+The complete example is in `examples/echo`: four operations (echo, relay through a host callback, a deliberate crash that is excluded from verification, and listing the received events), one event subscription, one health item and the configuration section `XiHan:Echo`. The test `EchoConformanceTest` puts it in a temporary directory, generates the launcher script for the current platform, and runs every case of the black-box runner from the submodule.
+
 ## Behavior Shared with the Host
 
 Behavior unified by the spec's ADR-0233, ADR-0235 and ADR-0236, the same in every language SDK and in .NET:
@@ -96,6 +180,8 @@ Behavior unified by the spec's ADR-0233, ADR-0235 and ADR-0236, the same in ever
 - **Baggage values**: values of registered keys must be non-empty, at most 256 UTF-16 code units long, and free of U+0000–U+001F and U+007F–U+009F. For external input, `Context.builder().baggage(…)` drops members that do not conform and keeps an existing value of the same name; for in-process derivation, `withBaggage` throws `IllegalArgumentException` when a registered key is given a non-conforming value (the previous version removed the key). `xihan.idempotency-key` is exempt in both cases.
 - **Tracing**: `traceparent` is accepted only if it matches `^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$` and its IDs are not all zeros; an invalid one is treated as absent. Only the sampled bit is taken, and only `00` / `01` is written (the previous version kept the whole flags byte and had `traceFlags()`; withdrawn); without an upstream, `01` is written.
 - **Pipeline**: duplicate registration, unknown stages, and constraint subjects that are unregistered or ambiguous by name are reported at registration; constraint targets that are unregistered or ambiguous, cross-stage constraints and cycles are reported at ordering time (`describe` / `dump` / `build`). Like .NET, ordering processes one stage at a time: within a stage, it resolves the constraints of each subject in baseline order (before first, then after, each in declaration order) and sorts only after resolving them all, so when several errors exist at once, the same one is reported. Name-based constraints use the same matching as .NET: an instance registered by name matches only its instance name, and a registration without a name matches the middleware name (in the previous version, the middleware name could also match an instance registered by name). Error messages are the original .NET English text, with an instance registered by name written as `TypeName[name]`; for a cycle, all middleware still blocked is listed in baseline order, for example `Middleware ordering constraints in stage 'validate' form a cycle: 'Guard[a]', 'Guard[b]'.`.
+- **Plugin protocol** (RFC-0017, `plugin/*.md`): every RPC from the host first checks the metadata `xihan-plugin-session` in constant time; a missing or mismatched token is rejected with `Unauthenticated` and nothing runs. The handshake selects the highest version shared with the host's list (vector `protocol-versions.json`) and refuses with `FailedPrecondition` when there is none; it hands over the manifest text, the operation declarations (contract and JSON Schema), the subscriptions (each (topic, type) pair declared once) and the message catalogs. States use the primitives' `LifecycleState`: `Resolved` after the handshake, `Configured` after `Configure`, `Started` after `Start` followed directly by `Ready`; the hook may report `Degraded` / `Failed`, and undeclared health items are not reported. `Stop` enters `Draining`, rejects new calls with `PLUGINS_UNAVAILABLE_001`, waits for in-flight calls within the grace period, then calls the stop hook, answers and exits the process; stdin closing and SIGTERM wind down the same way. `Invoke` runs through the invoker and the full pipeline, and an undeclared operation ends with `Unimplemented`; the invocation context is restored from the metadata: `traceparent`, the earlier of `deadline` and the gRPC deadline, and only registered baggage, and gRPC cancellation cancels the context. `InvokeStream` ends with `InvalidArgument` when the first frame is not `start`; this SDK has no streaming operations, so `start` always ends with `Unimplemented`. Events are handed to the handler by (topic, delivered mode, type), where an empty mode is `competing`; when none matches, the delivery fails with `KERNEL_NOTFOUND_001` + `plugins.event.unsubscribed` and is not handed to a handler of the other mode. Business failures go into `Status.error`: `text` is resolved in the host's default locale, and `details` is written by the value model. Each stderr line is one JSON object (`level`, `message` and scope properties), and the root logger of `java.util.logging` is rewritten to such lines as well.
+- **Callbacks** (`invocation.md` §5): every callback carries the session token and the context's trace, deadline and registered baggage, and cancelling the context cancels the callback. The tenant can only be that of a call the host has handed to the plugin and that is still being handled; a callback or published item that carries another tenant is rejected locally with `PLUGINS_DENIED_002` + `plugins.callback.tenant_denied` and is not sent to the host. gRPC statuses are mapped by the table in `invocation.md` §3: `Unavailable` is `PLUGINS_UNAVAILABLE_001`, `DeadlineExceeded` is `KERNEL_TIMEOUT_001`, `Cancelled` is attributed by the tokens (unreachable when no token fired), `Unauthenticated` and `PermissionDenied` are `PLUGINS_DENIED_002`, `Unimplemented` is `KERNEL_NOTFOUND_001`, `InvalidArgument` is `KERNEL_VALIDATION_001`, and anything else is `PLUGINS_UNEXPECTED_001`; an error from the host that does not follow the RFC-0001 encoding is also `PLUGINS_UNEXPECTED_001`.
 
 ## Language Mapping
 
@@ -106,6 +192,7 @@ How Java constructs map to the spec:
 - **Payload request types**: declare them as records or as classes with Jackson annotations. Mark required members with `@JsonProperty(required = true)` and leave optional members unannotated (when missing, they take Java's default: 0 / `false` for primitive types, `null` for reference types). `String`, `List` / arrays / other collections, `Map`, nested records and `JsonNode` / `Object` accept `null` (meaning no value); integers, floats and booleans, whether primitive or boxed (`Long`, `Double`, `Boolean`), do not accept `null`, and neither do their list items and map values. Types that are not recognized (enums, `java.time`, `Optional`, the primitives' `Maybe` / `TypedId` and other types with custom decoders, polymorphic types) are handed to Jackson individually at the position where they are read, and a failure reports the path given by Jackson; `byte[]` reads a Base64 string as Jackson does.
 - **Text and bytes**: `JsonText.check(String)`, `ManifestJson.read(String)` and `PrimitivesJson.read(mapper, String, …)` first encode the string as UTF-8; a lone surrogate in the string (which cannot be encoded as UTF-8) is treated as a syntax error, rather than replaced with `?` as `String.getBytes` does.
 - **The `Error` name**: `com.xihanfun.framework.primitives.Error` has the same name as `java.lang.Error`, so import it explicitly in files that use it; it is not a `Throwable`, so misuse is reported at compile time.
+- **Plugin hooks and callbacks**: the methods of `PluginHooks` all have default implementations and return `Result<Unit>`, and a failure is handed to the host as it is; a thrown exception is translated into `PLUGINS_UNEXPECTED_001` + `plugins.process.failed` (the error of a `FrameworkException` goes into `inner`). `PluginConfiguration.decode(type)` runs the shared JSON text check first and then reads with Jackson: the values of the host's configuration source are strings, so strings may be read as numbers and booleans, member names are case-insensitive, and unknown members are ignored. An exception thrown by an event handler is translated into `KERNEL_UNEXPECTED_001`. `Host.invoke` returns an `OperationResponse`, and `Host.publish` returns a `List<Result<Unit>>` with one result per envelope.
 
 ## Design
 
@@ -118,6 +205,8 @@ How Java constructs map to the spec:
 **Nullability.** Public members neither accept nor return `null`: values that may be absent are returned as `Optional` (`findBaggage`, `find`, `tenant()`), data fields that need wire encoding use `Maybe` (encoded as the value or `null`, and an object missing the field also decodes to no value), and absent collections are empty collections; passing `null` as an argument throws `NullPointerException`.
 
 **Bounded.** The item bag holds at most 1024 entries, baggage at most 180, values passed by derivation at most 256 keys, and the operation registry 10000 operations; exceeding these is a programming or configuration error. Pipeline middleware and ordering constraints have no limit, consistent with the .NET `PipelineBuilder`: they are registered by code at startup and do not come from external input (the previous version limited them to 1024 middleware and 4096 constraints; withdrawn).
+
+**Plugin runtime: grpc-java, with the generated code committed.** The transport is grpc-java's Netty transport (`grpc-netty-shaded`, which bundles a relocated Netty that does not clash with the application's own Netty) plus `protobuf-java`, and the server runs every call on `Executors.newVirtualThreadPerTaskExecutor()`, so handlers, hooks and callbacks may block. The protocol code is generated from `spec/plugin/plugin.proto` and committed to `src/main/java/com/xihanfun/framework/plugin/v1` instead of being generated on every build: the build does not need to download native protoc binaries, it is the same on every platform, and the generated code can be reviewed; `plugin.proto` has no Java options, so the `protocol` profile copies it and appends `java_package` and `java_outer_classname` at the end, and CI regenerates it and checks that nothing differs. The generated code does not relax the gates and passes `-Xlint:all -Werror` and doclint as well. Endpoints: on Linux, when the epoll native library bundled with grpc-netty-shaded is available (x86_64, aarch_64), the runtime listens on a Unix domain socket placed in a private directory newly created by the process (random name, `0700`, socket `0600`); on Windows, macOS and in other cases, it listens on a random port of the loopback TCP address `127.0.0.1` (allowed by the spec; other users on the same machine can connect, so isolation relies only on the session token). grpc-java does not support named pipes and supports Unix domain sockets only on Linux: when the host callback endpoint is `npipe` (what the .NET host does on Windows) or `unix` outside Linux, callbacks fail with `PLUGINS_UNAVAILABLE_001` + `plugins.host.unavailable`, while the plugin itself serves as usual. Since JDK 23, the `sun.misc.Unsafe` memory access used by Netty prints warnings on stderr; add `--sun-misc-unsafe-memory-access=allow` to the launcher script (JDK 21 does not have this option). The runtime's own message keys (`plugins.*`) are in the language files of `PluginMessages` for 10 locales; they are used only to fill in `Error.text` and are not sent to the host in the handshake, so that they cannot clash with keys of the same name in the host's catalog.
 
 ## Development
 
@@ -141,9 +230,13 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/roo
 
 With Maven 3.9+ and JDK 21+, run `mvn -B verify` directly. Gates: `maven.compiler.release` 21, compilation with `-Xlint:all -Werror` and `-Xdoclint:all,-missing`; tests use JUnit 6 (JUnit Platform) and run on the class path, and conformance vectors are read by relative path from the repository root (vector files are not copied). Do not commit the `target/` that the container writes as root.
 
+The example plugin `examples/echo` is compiled with the tests and passes the same gates. The conformance test `EchoConformanceTest` needs Go on PATH (see `spec/conformance/go.mod` for the version): it runs `go run ./cmd/xihan-conformance` in `spec/conformance`, so the runner comes from the same commit as the locked spec; without Go, the test is skipped and prints the reason. The `maven` image above has no Go; to run it in a container, use an image with Go installed as well, or install JDK 21+ and Go locally and run `mvn -B verify` directly.
+
+After `spec/plugin/plugin.proto` changes (a submodule upgrade), regenerate the protocol code with `mvn -B -Pprotocol process-sources`; in Docker, replace the `verify` at the end of the commands above with `-Pprotocol process-sources`. protoc and protoc-gen-grpc-java are taken from Maven Central, with the versions `protobuf.version` and `grpc.version` in `pom.xml`; the generated code replaces `src/main/java/com/xihanfun/framework/plugin/v1` as a whole and is committed together with the sources.
+
 ## Status
 
-`0.1.0-SNAPSHOT`: primitives, manifests, the invocation context, the pipeline and operations are usable; the out-of-process plugin runtime (`plugin`, `xihan.plugin.v1`, grpc-java) and the operation sets for remote providers (the first being `caching.distributed@1`) are planned, and samples will ship with them. For the official release, `-SNAPSHOT` will be dropped and the SDK published to Maven Central under the `v0.1.0` tag.
+`0.1.0-SNAPSHOT`: primitives, manifests, the invocation context, the pipeline, operations and the out-of-process plugin runtime (`plugin`, `xihan.plugin.v1`, grpc-java) are usable, and the example plugin `examples/echo` passes all 8 cases of the spec repository's black-box runner; the operation sets for remote providers (such as `caching.distributed@1`) are not provided yet. For the official release, `-SNAPSHOT` will be dropped and the SDK published to Maven Central under the `v0.1.0` tag.
 
 ## Ecosystem
 

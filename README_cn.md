@@ -22,7 +22,7 @@
 
 </div>
 
-[XiHan Spec](https://github.com/XiHanFun/framework-spec) 的 Java 实现：原语层、清单、调用上下文、管道与操作契约。用它可以把与 .NET 宿主（参考实现 [XiHan.Framework](https://github.com/XiHanFun/XiHan.Framework)）相同的原语用在 JVM 应用里。规范以 submodule 放在 `spec/`，一致性由规范仓库的一致性向量验证。
+[XiHan Spec](https://github.com/XiHanFun/framework-spec) 的 Java 实现：原语层、清单、调用上下文、管道、操作契约与进程外插件运行时。用它可以把与 .NET 宿主（参考实现 [XiHan.Framework](https://github.com/XiHanFun/XiHan.Framework)）相同的原语用在 JVM 应用里，也能写在 .NET 宿主里运行的 Java 插件。规范以 submodule 放在 `spec/`，一致性由规范仓库的一致性向量与黑盒运行器验证。
 
 ## 模块
 
@@ -36,8 +36,36 @@
 | `com.xihanfun.framework.invocation` | `Context`：取消与截止时间（按令牌归因为 `KERNEL_TIMEOUT_001` / `KERNEL_CANCELLED_001`，可登记回调）、W3C 追踪、已登记的 Baggage、对象袋 `Items`、按派生传递的值 | RFC-0003 |
 | `com.xihanfun.framework.pipeline` | 十一阶段的 `PipelineBuilder`：`use` / `useAt` / `useNamedInstance`、`before` / `after`（类型名或实例名）、`describe` / `dump`、`build`；排序规则与错误码 `KERNEL_PIPELINE_00x` | RFC-0004 |
 | `com.xihanfun.framework.operation` | `OperationContract`、`OperationSchema`、`OperationHandler<Req, Res>`、容量 10000 的 `OperationRegistry`、经完整管道执行的 `OperationInvoker`（XGI：JSON 请求与响应，另有类型化入口） | RFC-0011 |
+| `com.xihanfun.framework.plugin` | 进程外插件运行时：`PluginRuntime.serve(PluginOptions)`、生命周期回调 `PluginHooks`（配置、启动、停止、健康）、事件订阅 `Subscription` 与 `EventHandler`、握手交出的消息目录 `PluginCatalog`、宿主回调 `Host`（`Host.Invoke` 与批量的 `Host.Publish`）、stderr 的 JSON 行日志 `PluginLogger`；协议代码在不导出的 `com.xihanfun.framework.plugin.v1` | RFC-0017、`plugin/plugin.proto`、`plugin/handshake.md`、`plugin/lifecycle.md`、`plugin/invocation.md` |
 
-包之间的依赖方向：`operation → pipeline → invocation → primitives`，`manifest → primitives`。外部依赖只有 `jackson-databind`，模块描述里是 `requires transitive`。
+包之间的依赖方向：`plugin → operation → pipeline → invocation → primitives`，`plugin → manifest → primitives`。外部依赖只有 `jackson-databind`，模块描述里是 `requires transitive`。
+
+插件运行时另用 grpc-java 与 protobuf-java。它们在本构件里是可选依赖（`<optional>true</optional>`，模块描述里是 `requires static`），不传递给使用者，其余包不引用它们；写插件的应用自己加上，版本与本仓库 `pom.xml` 的 `grpc.version`、`protobuf.version` 相同（生成代码要求 protobuf-java 不低于生成它的版本）：
+
+```xml
+<dependency>
+  <groupId>io.grpc</groupId>
+  <artifactId>grpc-netty-shaded</artifactId>
+  <version>${grpc.version}</version>
+</dependency>
+<dependency>
+  <groupId>io.grpc</groupId>
+  <artifactId>grpc-protobuf</artifactId>
+  <version>${grpc.version}</version>
+</dependency>
+<dependency>
+  <groupId>io.grpc</groupId>
+  <artifactId>grpc-stub</artifactId>
+  <version>${grpc.version}</version>
+</dependency>
+<dependency>
+  <groupId>com.google.protobuf</groupId>
+  <artifactId>protobuf-java</artifactId>
+  <version>${protobuf.version}</version>
+</dependency>
+```
+
+在模块路径上用插件运行时，这些自动模块（`io.grpc`、`io.grpc.stub`、`io.grpc.protobuf`、`io.grpc.netty.shaded`、`com.google.protobuf`、`com.google.common`）要进入模块图：应用自己 `requires` 它们，或用 `--add-modules`。
 
 ## 快速开始
 
@@ -77,6 +105,62 @@ OperationResponse response = invoker.invoke(context, OperationRequest.of("orders
 - 配置错误（清单不合法、管道成环、操作重复登记、登记表已满）抛出带错误码的 `FrameworkException`；参数格式不合法这类调用方的编程错误抛 `IllegalArgumentException`，状态不允许抛 `IllegalStateException`。消息是英文句子，标识符加单引号。
 - `Result<T>`、`Error`、`Maybe<T>`、`TypedId` 的 JSON 编码按 RFC-0001「Result」：`new ObjectMapper().registerModule(new PrimitivesModule())`；从线上收到的文本用 `PrimitivesJson.read(mapper, bytes, type)` 读，它先过共同的 JSON 文本检查。生命周期迁移表、管道阶段顺序、错误码、Baggage 键与值、能力依赖文法、JSON 文本检查、线上编码、消息模板、内核错误、清单的读取与写出、载荷解码与管道排序都由 `spec/conformance/vectors` 验证，期望值逐字相等。
 
+### 写一个插件
+
+插件是宿主启动的子进程：`main` 里登记操作与订阅，交给 `PluginRuntime.serve`，它读宿主下发的环境变量、监听本机端点、向 stdout 写一行握手行，然后服务到 `Stop` 完成或 stdin 关闭：
+
+```java
+public final class GreetingPlugin {
+    record Greet(String name) { }
+    record Greeting(String text) { }
+
+    public static void main(String[] args) throws Exception {
+        OperationRegistry registry = new OperationRegistry();
+        registry.add(OperationContract.of("greetings.create").withStability(Stability.EXPERIMENTAL).withExpose(Expose.HTTP),
+                Greet.class, Greeting.class,
+                (context, request) -> Result.ok(new Greeting("hello, " + request.name())));
+
+        PluginRuntime.serve(PluginOptions.builder()
+                .operations(registry)
+                .subscribe(Subscription.of("greetings.requested"), (context, envelope, attempt) -> Result.success())
+                .catalog(PluginCatalog.load("greetings", locale -> GreetingPlugin.class.getResourceAsStream("Localization/" + locale + ".json")))
+                .build());
+    }
+}
+```
+
+清单 `xihan.manifest.json` 放在插件目录里，运行时从工作目录（即插件目录）读它，握手时原样交给宿主，宿主核对它与目录里的文件逐字段一致：
+
+```json
+{
+  "$schema": "https://spec.xihanfun.com/manifest/v1.json",
+  "id": "xihan.samples.greeting",
+  "version": "0.1.0",
+  "primitives": "1",
+  "stability": "experimental",
+  "kind": "plugin",
+  "isolation": "out-of-process",
+  "contributes": { "operations": [ "greetings.create" ], "health": [ "greeting" ] },
+  "permissions": [ "capability:kernel.pipeline" ],
+  "activation": [ "onStartup" ],
+  "entry": "greeting"
+}
+```
+
+- `kind` 是 `plugin`、`isolation` 是 `out-of-process`；不写 `contributes.pipeline`（只有 Wasm 插件能贡献中间件），否则运行时在监听之前就以 `PLUGINS_VALIDATION_001` 拒绝。
+- 登记的每个操作都要出现在 `contributes.operations`，回调报的健康项都要出现在 `contributes.health`；回调宿主要在 `permissions` 里声明 `capability:kernel.pipeline`（`Host.Invoke`）或 `capability:messaging.queue`（`Host.Publish`）。
+- `entry` 是相对插件目录的可执行文件（Windows 上没有扩展名时宿主补 `.exe`）。Java 插件的 `entry` 指向启动脚本：Unix 上是带 shebang、可执行的 sh 脚本，Windows 上是 `.cmd`。宿主只继承 `handshake.md` §1 列出的环境变量，`JAVA_HOME` 不在其中，所以脚本里写 `java` 的绝对路径与完整的类路径，例如 `exec /opt/java/bin/java -cp '/opt/greeting/lib/*' GreetingPlugin "$@"`。
+- 处理器里用 `Host.of(context)` 回调宿主：`invoke(context, "orders.create", payload)` 经宿主的完整管道调用操作，`publish(context, envelopes)` 批量发布、逐项结果。
+
+用规范仓库的黑盒运行器验证（需要 Go，参数见 `spec/conformance/README.md`）：
+
+```bash
+cd spec/conformance
+go run ./cmd/xihan-conformance plugin --dir <插件目录> --sample 'greetings.create={"name":"hi"}'
+```
+
+完整的示例在 `examples/echo`：回声、经宿主回调转发、故意崩溃（验证时排除）、列出收到的事件四个操作，一个事件订阅、一个健康项与配置节 `XiHan:Echo`。测试 `EchoConformanceTest` 把它放进临时目录、按当前平台生成启动脚本，再从 submodule 运行黑盒运行器跑全部用例。
+
 ## 与宿主共用的行为
 
 按规范 ADR-0233、ADR-0235、ADR-0236 统一的行为，各语言 SDK 与 .NET 相同：
@@ -96,6 +180,8 @@ OperationResponse response = invoker.invoke(context, OperationRequest.of("orders
 - **Baggage 值**：已登记键的值要非空、按 UTF-16 码元计最多 256、不含 U+0000–U+001F 与 U+007F–U+009F。外部输入 `Context.builder().baggage(…)` 丢弃不合的成员、已有的同名值保留；程序内派生 `withBaggage` 给已登记的键一个不合的值抛 `IllegalArgumentException`（上一版是去掉这个键）。`xihan.idempotency-key` 两种情形都例外。
 - **追踪**：`traceparent` 只认 `^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`、标识不能全零，不合法的当作没给；只取采样位，写出只写 `00` / `01`（上一版整字节保留标志、有 `traceFlags()`，已撤回）；没有上游时写 `01`。
 - **管道**：重复登记、未知阶段、约束主体未登记或按名字有歧义在登记时报；约束目标未登记或有歧义、跨阶段与成环在排序（`describe` / `dump` / `build`）时报。排序与 .NET 一样逐个阶段处理：阶段内按基准次序逐个主体解析它的约束（先 before 再 after，各按声明顺序），解析完再排序，所以几处错误同时存在时报的是同一个。按名字的约束与 .NET 同一种匹配：按名字登记的实例只认实例名，没有名字的登记认中间件名（上一版中间件名也能对上按名字登记的实例）。错误消息是 .NET 的英文原文，按名字登记的实例写成 `类型名[名字]`，成环时按基准次序列出全部仍被卡住的中间件，如 `Middleware ordering constraints in stage 'validate' form a cycle: 'Guard[a]', 'Guard[b]'.`。
+- **插件协议**（RFC-0017，`plugin/*.md`）：宿主的每个 RPC 先按常数时间核对元数据 `xihan-plugin-session`，缺失或不匹配以 `Unauthenticated` 拒绝、不执行。握手选宿主列表里最高的共同版本（向量 `protocol-versions.json`），没有交集以 `FailedPrecondition` 拒绝；交出清单原文、操作声明（契约与 JSON Schema）、订阅（同一（主题，类型）对只声明一次）与消息目录。状态用原语层的 `LifecycleState`：握手后 `Resolved`，`Configure` 后 `Configured`，`Start` 后 `Started` 并直接报 `Ready`，回调可自报 `Degraded` / `Failed`，未声明的健康项不上报；`Stop` 进入 `Draining`，新调用以 `PLUGINS_UNAVAILABLE_001` 拒绝，在宽限内等在途调用，再调用停止回调、应答、退出进程；stdin 关闭与 SIGTERM 同样收尾。`Invoke` 经调用器与完整管道执行，未声明的操作以 `Unimplemented` 结束；上下文从元数据还原：`traceparent`、`deadline` 与 gRPC 截止时间取较早的、只收已登记的 Baggage，gRPC 取消即上下文取消。`InvokeStream` 第一帧不是 `start` 为 `InvalidArgument`，本 SDK 没有流式操作，`start` 一律 `Unimplemented`。事件按（主题，投递的方式，类型）找处理器，空方式同 `competing`，找不到以 `KERNEL_NOTFOUND_001` + `plugins.event.unsubscribed` 失败、不改交给另一种方式的处理器。业务失败写进 `Status.error`：`text` 按宿主的默认区域解析，`details` 按值模型写出。stderr 每行一个 JSON 对象（`level`、`message` 与作用域属性），`java.util.logging` 的根日志也改写成这种行。
+- **回调**（`invocation.md` §5）：每次回调带会话令牌与上下文的追踪、截止时间、已登记的 Baggage，上下文取消即取消回调。租户只能是宿主此刻交给插件、还在处理的某个调用的租户，带了别的租户的回调与发布项本地就以 `PLUGINS_DENIED_002` + `plugins.callback.tenant_denied` 拒绝，不发给宿主。gRPC 状态按 `invocation.md` §3 的表映射：`Unavailable` 为 `PLUGINS_UNAVAILABLE_001`，`DeadlineExceeded` 为 `KERNEL_TIMEOUT_001`，`Cancelled` 按令牌归因（令牌没有触发时是不可达），`Unauthenticated` 与 `PermissionDenied` 为 `PLUGINS_DENIED_002`，`Unimplemented` 为 `KERNEL_NOTFOUND_001`，`InvalidArgument` 为 `KERNEL_VALIDATION_001`，其余为 `PLUGINS_UNEXPECTED_001`；宿主交回的错误不合 RFC-0001 的编码时也是 `PLUGINS_UNEXPECTED_001`。
 
 ## 语言映射
 
@@ -106,6 +192,7 @@ Java 的写法与规范的对应：
 - **载荷的请求类型**：用记录或带 Jackson 注解的类声明。必填成员写 `@JsonProperty(required = true)`，可选成员不加注解（缺少时取 Java 的缺省值：基本类型为 0 / `false`，引用类型为 `null`）。`String`、`List` / 数组 / 其他集合、`Map`、嵌套的记录与 `JsonNode` / `Object` 接受 `null`（等于没有值）；整数、浮点与布尔不论是基本类型还是包装类型（`Long`、`Double`、`Boolean`）都不接受 `null`，它们的列表项与字典值同样不接受。认不出的类型（枚举、`java.time`、`Optional`、原语的 `Maybe` / `TypedId` 与其他自定义解码器、多态类型）在读到的位置单独交给 Jackson，失败时报 Jackson 给出的路径；`byte[]` 照 Jackson 读 Base64 字符串。
 - **文本与字节**：`JsonText.check(String)`、`ManifestJson.read(String)`、`PrimitivesJson.read(mapper, String, …)` 先把字符串编成 UTF-8；字符串里有孤立的代理项（编不成 UTF-8）按语法错误处理，不像 `String.getBytes` 那样换成 `?`。
 - **同名的 `Error`**：`com.xihanfun.framework.primitives.Error` 与 `java.lang.Error` 同名，在用到它的文件里显式导入；它不是 `Throwable`，误用在编译期就报错。
+- **插件的回调与钩子**：`PluginHooks` 的方法都有缺省实现，返回 `Result<Unit>`，失败原样交给宿主；抛出的异常翻译为 `PLUGINS_UNEXPECTED_001` + `plugins.process.failed`（`FrameworkException` 的错误进 `inner`）。`PluginConfiguration.decode(type)` 先过共同的 JSON 文本检查，再按 Jackson 读：宿主配置源的值是字符串，所以允许把字符串读成数字与布尔，成员名不区分大小写，未知成员忽略。事件处理器抛出的异常翻译为 `KERNEL_UNEXPECTED_001`。`Host.invoke` 返回 `OperationResponse`，`Host.publish` 返回与信封一一对应的 `List<Result<Unit>>`。
 
 ## 设计
 
@@ -118,6 +205,8 @@ Java 的写法与规范的对应：
 **可空性。** 公开成员不接受也不返回 `null`：可能没有的值以 `Optional` 返回（`findBaggage`、`find`、`tenant()`），需要线上编码的数据字段用 `Maybe`（编码为值或 `null`，对象里缺这个字段也解码为无值），集合没有时是空集合；参数传 `null` 抛 `NullPointerException`。
 
 **有界。** 对象袋最多 1024 个条目、Baggage 最多 180 个、按派生的值最多 256 个键、操作登记表 10000 个操作，超出是编程或配置错误。管道的中间件与顺序约束不设上限，与 .NET 的 `PipelineBuilder` 一致：它们由代码在启动时登记，不来自外部输入（上一版限 1024 个中间件与 4096 条约束，已撤回）。
+
+**插件运行时：grpc-java，生成代码提交进仓库。** 传输是 grpc-java 的 Netty 传输（`grpc-netty-shaded`，自带改了包名的 Netty，不与应用自己的 Netty 冲突）加 `protobuf-java`，服务端以 `Executors.newVirtualThreadPerTaskExecutor()` 执行每一次调用，处理器、钩子与回调都可以阻塞。协议代码由 `spec/plugin/plugin.proto` 生成并提交进 `src/main/java/com/xihanfun/framework/plugin/v1`，不在每次构建时生成：构建不需要下载 protoc 的原生程序、各平台一致，生成物可以审阅；`plugin.proto` 没有 Java 选项，`protocol` 配置先复制一份并在末尾补上 `java_package` 与 `java_outer_classname`，CI 重新生成后核对没有差异。生成代码不放宽门禁，照样过 `-Xlint:all -Werror` 与 doclint。端点：Linux 上 grpc-netty-shaded 自带的 epoll 原生库可用时（x86_64、aarch_64）监听 Unix 域套接字，套接字放进本进程新建的私有目录（名字随机、`0700`，套接字 `0600`）；Windows、macOS 与其余情形监听回环 TCP `127.0.0.1` 的随机端口（规范允许，同机的其他用户连得上，隔离只靠会话令牌）。grpc-java 不支持命名管道，也只在 Linux 上支持 Unix 域套接字：宿主回调端点是 `npipe`（.NET 宿主在 Windows 上的做法）或非 Linux 上的 `unix` 时，回调以 `PLUGINS_UNAVAILABLE_001` + `plugins.host.unavailable` 失败，插件本身照常服务。JDK 23 起 Netty 用到的 `sun.misc.Unsafe` 内存访问会在 stderr 打告警，启动脚本里加 `--sun-misc-unsafe-memory-access=allow` 即可（JDK 21 没有这个选项）。运行时自己的消息键（`plugins.*`）在 `PluginMessages` 的 10 种区域语言文件里，只用来填写 `Error.text`，不随握手发给宿主，免得与宿主目录里的同名键冲突。
 
 ## 开发
 
@@ -141,9 +230,13 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/roo
 
 有 Maven 3.9+ 与 JDK 21+ 时直接 `mvn -B verify`。门禁：`maven.compiler.release` 21，编译带 `-Xlint:all -Werror` 与 `-Xdoclint:all,-missing`；测试是 JUnit 6（JUnit Platform），在类路径上运行，一致性向量按仓库根的相对路径读取（不复制向量文件）。容器以 root 写出的 `target/` 不提交。
 
+示例插件 `examples/echo` 随测试编译，同样过上面的门禁。一致性测试 `EchoConformanceTest` 需要 PATH 上有 Go（版本见 `spec/conformance/go.mod`）：它在 `spec/conformance` 里 `go run ./cmd/xihan-conformance`，运行器与锁定的规范是同一个提交；没有 Go 时这个测试跳过并打印原因。上面的 `maven` 镜像里没有 Go，要在容器里跑到它，用另装了 Go 的镜像，或在本机装好 JDK 21+ 与 Go 后直接 `mvn -B verify`。
+
+改了 `spec/plugin/plugin.proto`（submodule 升级）后重新生成协议代码：`mvn -B -Pprotocol process-sources`，在 Docker 里就是把上面命令末尾的 `verify` 换成 `-Pprotocol process-sources`。protoc 与 protoc-gen-grpc-java 从 Maven Central 取，版本即 `pom.xml` 的 `protobuf.version` 与 `grpc.version`；生成物整个替换 `src/main/java/com/xihanfun/framework/plugin/v1`，与源文件一起提交。
+
 ## 状态
 
-`0.1.0-SNAPSHOT`：原语、清单、调用上下文、管道与操作可用；进程外插件运行时（`plugin`，`xihan.plugin.v1`，grpc-java）与远程 Provider 的操作集（首个是 `caching.distributed@1`）规划中，示例随它们提供。正式发布时去掉 `-SNAPSHOT`，以 `v0.1.0` 标签发布到 Maven Central。
+`0.1.0-SNAPSHOT`：原语、清单、调用上下文、管道、操作与进程外插件运行时（`plugin`，`xihan.plugin.v1`，grpc-java）可用，示例插件 `examples/echo` 通过规范仓库黑盒运行器的全部 8 个用例；远程 Provider 的操作集（如 `caching.distributed@1`）尚未提供。正式发布时去掉 `-SNAPSHOT`，以 `v0.1.0` 标签发布到 Maven Central。
 
 ## 生态
 

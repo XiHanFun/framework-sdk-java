@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# 由 spec/plugin/plugin.proto 生成的协议代码（mvn -Pprotocol process-sources）：原样提交，不按手写代码的空白规则检查
+src/main/java/com/xihanfun/framework/plugin/v1/*.java -whitespace linguist-generated=true

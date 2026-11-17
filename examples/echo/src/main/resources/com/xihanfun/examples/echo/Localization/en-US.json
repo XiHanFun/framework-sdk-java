@@ -1,0 +1,13 @@
+{
+  "echoes.create.description": "Echoes the text together with the greeting, tenant, principal and correlation ID.",
+  "echoes.create.title": "Echo",
+  "echoes.relay.description": "Invokes another operation through the host and returns its response.",
+  "echoes.relay.title": "Relay",
+  "echojava.configuration.invalid": "The XiHan:Echo configuration is not valid at {reason}.",
+  "echojava.host.unavailable": "The host callback endpoint is not available.",
+  "echojava.relay.invalid_response": "The host returned a response of {operation} that is not JSON.",
+  "echojava.relay.operation_missing": "The request of {operation} needs an operation ID.",
+  "echojava.text.missing": "The text of {operation} is required.",
+  "events.list.description": "Lists the IDs of the events delivered to the plugin.",
+  "events.list.title": "Received events"
+}
