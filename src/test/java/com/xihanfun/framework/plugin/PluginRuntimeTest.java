@@ -76,6 +76,18 @@ class PluginRuntimeTest {
     record Flag(boolean flag) {
     }
 
+    /** 成员名匹配用的配置节。 */
+    record Keyed(String key, int count) {
+    }
+
+    /** 属性名是非 ASCII 字母的配置节。 */
+    record Unicode(String été) {
+    }
+
+    /** 嵌套的配置节。 */
+    record Nested(Keyed inner, List<Keyed> list, Map<String, Keyed> map, Keyed[] array) {
+    }
+
     private static OperationRegistry registry() {
         OperationRegistry registry = new OperationRegistry();
         registry.add(OperationContract.of("samples.echo").withStability(Stability.PREVIEW).withExpose(Expose.MCP, Expose.HTTP).withPermission("samples.read"),
@@ -369,7 +381,7 @@ class PluginRuntimeTest {
             hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.READY)));
             assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_READY, health(plugin).getState());
 
-            // 抛出：这一次的结果是 Degraded、没有健康项，状态不变
+            // 抛出：这一次的结果是 Degraded、没有健康项，状态与报了 Degraded 一样迁到 Degraded（lifecycle.md §7.4）
             hooks.health.set(() -> {
                 throw new UnsupportedOperationException("not now");
             });
@@ -377,12 +389,17 @@ class PluginRuntimeTest {
             assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_DEGRADED, threw.getState());
             assertEquals(0, threw.getItemsCount());
             assertEquals(object("id", "xihan.tests.sample", "phase", "health", "reason", "UnsupportedOperationException"), details(threw.getError()));
-            assertEquals(LifecycleState.READY, plugin.runtime.lifecycle.state());
+            assertEquals(LifecycleState.DEGRADED, plugin.runtime.lifecycle.state());
+            assertEquals("PLUGINS_UNEXPECTED_001", plugin.runtime.lifecycle.error().orElseThrow().code());
 
-            // 其他状态不改变状态
+            // 其他状态不改变状态；之后的结果照常决定状态
             hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.DRAINING)));
             health(plugin);
+            assertEquals(LifecycleState.DEGRADED, plugin.runtime.lifecycle.state());
+            hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.READY)));
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_READY, health(plugin).getState());
             assertEquals(LifecycleState.READY, plugin.runtime.lifecycle.state());
+            assertTrue(plugin.runtime.lifecycle.error().isEmpty(), "Ready clears the error");
 
             hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.FAILED)));
             assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_FAILED, health(plugin).getState());
@@ -509,8 +526,32 @@ class PluginRuntimeTest {
         }
         assertEquals(new Flag(true), configuration("{\"FLAG\":\"TRUE\"}").decode(Flag.class));
         assertThrows(IOException.class, () -> configuration("{\"count\":1,\"count\":2}").decode(Count.class), "the common JSON check comes first");
-        assertTrue(ConfigurationScalars.asciiEqualsIgnoreCase("FaLsE", "false"));
-        assertFalse(ConfigurationScalars.asciiEqualsIgnoreCase("fal\u017Fe", "false"), "the long s is not an ASCII letter");
+        assertTrue(ConfigurationNames.asciiEqualsIgnoreCase("FaLsE", "false"));
+        assertFalse(ConfigurationNames.asciiEqualsIgnoreCase("fal\u017Fe", "false"), "the long s is not an ASCII letter");
+        assertFalse(ConfigurationNames.asciiEqualsIgnoreCase("\u212Aey", "key"), "the Kelvin sign is not an ASCII letter");
+    }
+
+    @Test
+    void configurationMemberNamesMatchByAsciiCaseOnly() throws Exception {
+        // lifecycle.md §7.2：成员名按 ASCII 不区分大小写；U+212A（开尔文符号）在 Unicode 里小写成 k，按 ASCII 不算
+        assertEquals(new Keyed("v", 0), configuration("{\"KEY\":\"v\"}").decode(Keyed.class));
+        assertEquals(new Keyed(null, 0), configuration("{\"\u212Aey\":\"v\"}").decode(Keyed.class), "the Kelvin sign is not 'k'");
+        assertEquals(new Keyed(null, 0), configuration("{\"\u212AEY\":\"v\"}").decode(Keyed.class));
+        assertEquals(new Unicode(null), configuration("{\"\u00C9t\u00C9\":\"v\"}").decode(Unicode.class), "non-ASCII letters match only as they are");
+        assertEquals(new Unicode("v"), configuration("{\"\u00E9t\u00E9\":\"v\"}").decode(Unicode.class));
+        assertEquals(new Unicode("v"), configuration("{\"\u00E9T\u00E9\":\"v\"}").decode(Unicode.class), "ASCII letters still fold");
+        // 原样相同的属性优先，其次 ASCII 不区分大小写
+        assertEquals(new Keyed("exact", 2), configuration("{\"key\":\"exact\",\"COUNT\":\"2\"}").decode(Keyed.class));
+        // 嵌套的记录、列表、数组与字典的值逐层改写；字典的键原样
+        Nested nested = configuration("{\"INNER\":{\"Key\":\"a\",\"Count\":\"1\"},\"LIST\":[{\"KEY\":\"b\"}],"
+                + "\"Map\":{\"Name\":{\"kEy\":\"c\"}},\"ARRAY\":[{\"COUNT\":3}],\"\u212Anown\":1}").decode(Nested.class);
+        assertEquals(new Keyed("a", 1), nested.inner());
+        assertEquals(List.of(new Keyed("b", 0)), nested.list());
+        assertEquals(Map.of("Name", new Keyed("c", 0)), nested.map());
+        assertEquals(List.of(new Keyed(null, 3)), List.of(nested.array()));
+        // 数字原文照读：超出双精度的小数与 BigDecimal 的精度不因改写而变
+        assertEquals(new Typed(1, 9007199254740993L, 0.1, false, null, new BigDecimal("1.50")),
+                configuration("{\"COUNT\":1,\"BIG\":9007199254740993,\"Ratio\":0.1,\"Amount\":1.50}").decode(Typed.class));
     }
 
     private static PluginConfiguration configuration(String section) {

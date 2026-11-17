@@ -57,8 +57,9 @@ public interface PluginHooks {
     /**
      * 给出当前健康（{@code lifecycle.md} §7.4）：{@code Start} 成功后求一次，之后 {@code Ready}、{@code Degraded} 期间每次 {@code Health}
      * 都求一次，{@code WatchHealth} 每 10 秒求一次；要快、不阻塞。报 {@code Ready}、{@code Degraded} 或 {@code Failed} 的按合法迁移改变插件状态
-     * （{@code Failed} 之后不再回来），报其他状态的不改变状态；不在清单 {@code contributes.health} 里的健康项丢掉。抛出时这一次的结果是
-     * {@code Degraded}、没有健康项，错误为 {@code PLUGINS_UNEXPECTED_001}（{@code phase} 为 {@code health}）。
+     * （{@code Failed} 之后不再回来），报其他状态的不改变状态（{@code Start} 之后的第一次按 {@code Ready}）；不在清单 {@code contributes.health}
+     * 里的健康项丢掉。抛出时这一次的结果是 {@code Degraded}、没有健康项，错误为 {@code PLUGINS_UNEXPECTED_001}（{@code phase} 为 {@code health}），
+     * 插件也与报了 {@code Degraded} 一样迁到 {@code Degraded}，之后的结果照常决定状态。
      *
      * @return 健康；为空表示没有健康回调，按运行时自己的状态上报，没有健康项
      */

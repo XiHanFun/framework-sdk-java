@@ -566,7 +566,8 @@ public final class PluginRuntime {
 
     /**
      * 调一次健康回调：健康项只保留清单声明的名字；回调报的 {@code Ready}、{@code Degraded}、{@code Failed} 按合法迁移同步到插件状态
-     * （{@code settling} 时由 {@link #settle()} 迁移）；抛出时这一次的结果是 {@code Degraded}、没有健康项，错误为 {@code PLUGINS_UNEXPECTED_001}。
+     * （{@code settling} 时由 {@link #settle()} 迁移）；抛出时这一次的结果是 {@code Degraded}、没有健康项，错误为 {@code PLUGINS_UNEXPECTED_001}，
+     * 状态也与回调报了 {@code Degraded} 一样迁到 {@code Degraded}。
      *
      * @param settling 为真时是 {@code Start} 之后的第一次：返回的状态是要进入的状态，不在这里迁移
      */
@@ -582,7 +583,12 @@ public final class PluginRuntime {
             if (healthFailing.compareAndSet(false, true)) {
                 logger.error("the health hook threw", failed, Map.of());
             }
-            return new PluginHealth(LifecycleState.DEGRADED, List.of(), Optional.of(wire.failed("health", Wire.typeName(failed))));
+            Error error = wire.failed("health", Wire.typeName(failed));
+            if (!settling) {
+                // 与回调报了 Degraded 一样迁到 Degraded，之后的结果照常决定状态（lifecycle.md §7.4）
+                lifecycle.transition(LifecycleState.DEGRADED, error);
+            }
+            return new PluginHealth(LifecycleState.DEGRADED, List.of(), Optional.of(error));
         }
         if (reported.isEmpty()) {
             return settling ? new PluginHealth(LifecycleState.READY, List.of(), Optional.empty())

@@ -43,21 +43,6 @@ final class ConfigurationScalars extends SimpleModule {
         setDeserializerModifier(new Modifier());
     }
 
-    /** ASCII 不区分大小写地比较：只把 {@code A}–{@code Z} 换成小写，{@code ſ}、{@code ı} 这类大小写映射到 ASCII 的字符不算。 */
-    static boolean asciiEqualsIgnoreCase(String text, String lower) {
-        if (text.length() != lower.length()) {
-            return false;
-        }
-        for (int index = 0; index < text.length(); index++) {
-            char c = text.charAt(index);
-            char folded = c >= 'A' && c <= 'Z' ? (char) (c + ('a' - 'A')) : c;
-            if (folded != lower.charAt(index)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     /** 判断文本是不是 JSON 数字。 */
     static boolean isJsonNumber(String text) {
         return JSON_NUMBER.matcher(text).matches();
@@ -106,10 +91,10 @@ final class ConfigurationScalars extends SimpleModule {
             }
             String text = parser.getText();
             if (bool) {
-                if (asciiEqualsIgnoreCase(text, "true")) {
+                if (ConfigurationNames.asciiEqualsIgnoreCase(text, "true")) {
                     return Boolean.TRUE;
                 }
-                if (asciiEqualsIgnoreCase(text, "false")) {
+                if (ConfigurationNames.asciiEqualsIgnoreCase(text, "false")) {
                     return Boolean.FALSE;
                 }
                 return context.handleWeirdStringValue(handledType(), text, "only 'true' and 'false' read as a boolean");

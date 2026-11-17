@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.protobuf.ByteString;
+import com.xihanfun.framework.invocation.CancellableContext;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.operation.OperationContract;
 import com.xihanfun.framework.operation.OperationRegistry;
@@ -34,6 +35,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,6 +73,13 @@ class HostCallbackTest {
     record Relay(String operation, String tenant) {
     }
 
+    /**
+     * 请求：在给定状态的上下文里经宿主调用 {@code operation}：{@code expired} 是截止时间已过，{@code cancelled} 是已被取消，
+     * {@code timeout} 是 300 毫秒后到截止时间，{@code cancel-later} 是 300 毫秒后取消。
+     */
+    record Guarded(String operation, String state) {
+    }
+
     /** 请求：发布这些主题，各带可选的 {@code xihantenant}；{@code tenant} 不为空时先往上下文里加这个租户。 */
     record Publish(List<String> topics, List<String> tenants, String tenant) {
     }
@@ -99,6 +108,21 @@ class HostCallbackTest {
                 Deadline deadline = io.grpc.Context.current().getDeadline();
                 deadlines.add(deadline == null ? Instant.EPOCH : Instant.now().plusNanos(deadline.timeRemaining(TimeUnit.NANOSECONDS)));
                 String operation = request.getOperation();
+                if (operation.equals("host.slow")) {
+                    // 不应答，直到调用方的截止时间或取消结束这次调用（最多 5 秒）
+                    long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                    while (!io.grpc.Context.current().isCancelled() && System.nanoTime() < until) {
+                        try {
+                            Thread.sleep(20);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                    }
+                    if (io.grpc.Context.current().isCancelled()) {
+                        return;
+                    }
+                }
                 if (operation.startsWith("host.status.")) {
                     observer.onError(Status.fromCodeValue(Integer.parseInt(operation.substring("host.status.".length()))).withDescription("boom")
                             .asRuntimeException());
@@ -176,6 +200,30 @@ class HostCallbackTest {
             Context call = request.tenant() == null ? context : context.withBaggage(BaggageKeys.TENANT, request.tenant());
             OperationResponse response = Host.of(call).orElseThrow().invoke(call, request.operation(), "{}".getBytes(StandardCharsets.UTF_8));
             return Result.ok(response.outcome().error().map(Outcome::failed).orElseGet(() -> Outcome.of(response.outcome(), response.payloadText().orElse(""))));
+        });
+        registry.add(OperationContract.of("samples.wait"), Guarded.class, Outcome.class, (context, request) -> {
+            CancellableContext scope = switch (request.state()) {
+                case "expired" -> context.withTimeout(Duration.ZERO);
+                case "timeout" -> context.withTimeout(Duration.ofMillis(300));
+                default -> context.withCancellation();
+            };
+            try (scope) {
+                if (request.state().equals("cancelled")) {
+                    scope.cancel();
+                } else if (request.state().equals("cancel-later")) {
+                    Thread.ofVirtual().start(() -> {
+                        try {
+                            Thread.sleep(300);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                        scope.cancel();
+                    });
+                }
+                OperationResponse response = Host.of(scope.context()).orElseThrow().invoke(scope.context(), request.operation(),
+                        "{}".getBytes(StandardCharsets.UTF_8));
+                return Result.ok(response.outcome().error().map(Outcome::failed).orElseGet(() -> Outcome.of(response.outcome(), "")));
+            }
         });
         registry.add(OperationContract.of("samples.publish"), Publish.class, Published.class, (context, request) -> {
             Context call = request.tenant() == null ? context : context.withBaggage(BaggageKeys.TENANT, request.tenant());
@@ -351,6 +399,33 @@ class HostCallbackTest {
     }
 
     @Test
+    void anExpiredOrCancelledContextSendsNoCallback() throws Exception {
+        // invocation.md §5 第 ④ 步：截止时间已过按 DeadlineExceeded，已被取消按取消信号已触发的 Cancelled，不发请求
+        try (RunningPlugin plugin = start(hostAddress())) {
+            assertEquals(new Outcome(false, "KERNEL_TIMEOUT_001", "kernel.invocation.deadline_exceeded", "", ""),
+                    call(plugin, "samples.wait", new Guarded("orders.create", "expired"), null, Outcome.class));
+            assertEquals(new Outcome(false, "KERNEL_CANCELLED_001", "kernel.invocation.cancelled", "", ""),
+                    call(plugin, "samples.wait", new Guarded("orders.create", "cancelled"), null, Outcome.class));
+            assertEquals(List.of(), sessions, "no request reaches the host");
+            // 在途的回调：截止时间到了由 grpc-java 以 DeadlineExceeded 结束，调用方取消以 Cancelled 结束
+            assertEquals(new Outcome(false, "KERNEL_TIMEOUT_001", "kernel.invocation.deadline_exceeded", "", ""),
+                    call(plugin, "samples.wait", new Guarded("host.slow", "timeout"), null, Outcome.class));
+            assertEquals(new Outcome(false, "KERNEL_CANCELLED_001", "kernel.invocation.cancelled", "", ""),
+                    call(plugin, "samples.wait", new Guarded("host.slow", "cancel-later"), null, Outcome.class));
+        }
+        // 先后：端点在前，其次权限，最后才是截止时间与取消
+        Path missing = Files.createDirectories(directory.resolve("missing"));
+        try (RunningPlugin plugin = start(missing, RunningPlugin.MANIFEST, Map.of())) {
+            assertEquals(PluginMessages.HOST_UNAVAILABLE, call(plugin, "samples.wait", new Guarded("orders.create", "expired"), null, Outcome.class).key());
+        }
+        Path undeclared = Files.createDirectories(directory.resolve("undeclared"));
+        try (RunningPlugin plugin = start(undeclared, RunningPlugin.MANIFEST.replace("\"capability:kernel.pipeline\", ", ""),
+                Map.of(PluginRuntime.ENV_HOST_ADDRESS, hostAddress()))) {
+            assertEquals(PluginMessages.CALLBACK_DENIED, call(plugin, "samples.wait", new Guarded("orders.create", "cancelled"), null, Outcome.class).key());
+        }
+    }
+
+    @Test
     void theFirstEndpointTheSdkCanDialIsChosenAndKept() throws Exception {
         // 宿主的偏好在前：命名管道本 SDK 连不了，取后面的回环 TCP（handshake.md §4）
         try (RunningPlugin plugin = start("npipe \\\\.\\pipe\\xihan-host-test;" + hostAddress())) {
@@ -410,6 +485,55 @@ class HostCallbackTest {
             assertEquals("", Wire.error(error).getText(), "the mapped errors carry message keys");
         }
         assertEquals("17", Host.statusName(17), "codes outside 0-16 are written as numbers");
+    }
+
+    @Test
+    void replaysTheErrorReadingVector() throws Exception {
+        // error-reading.json：插件读宿主写来的 Error 与没有 error 的 Status（invocation.md §3）
+        JsonNode vectors = Vectors.read("plugin/error-reading.json");
+        Wire wire = new Wire(vectors.get("pluginId").asText());
+        for (JsonNode vector : vectors.get("cases")) {
+            assertDecoded(vector.get("expected"), wire.readError(proto(vector.get("error"))), vector.get("name").asText());
+        }
+        int replayed = 0;
+        for (JsonNode vector : vectors.get("statusWithoutError")) {
+            if (!vector.get("reader").asText().equals("plugin")) {
+                continue;
+            }
+            String phase = vector.get("rpc").asText().equals("publish") ? Host.RPC_PUBLISH : vector.get("operation").asText();
+            // ok 为假却没有 error，与整个 status 缺失（协议里缺失的消息读成缺省实例）相同
+            for (PluginProto.Status status : java.util.Arrays.asList(PluginProto.Status.newBuilder().setOk(false).build(),
+                    PluginProto.Status.getDefaultInstance(), null)) {
+                assertDecoded(vector.get("expected"), wire.readStatus(status, phase).error().orElseThrow(), vector.toString());
+            }
+            replayed++;
+        }
+        assertEquals(2, replayed);
+    }
+
+    private static PluginProto.Error proto(JsonNode error) {
+        PluginProto.Error.Builder builder = PluginProto.Error.newBuilder().setCode(error.get("code").asText())
+                .setMessageKey(error.get("message_key").asText()).setText(error.get("text").asText()).setDetails(error.get("details").asText());
+        if (error.hasNonNull("inner")) {
+            builder.setInner(proto(error.get("inner")));
+        }
+        return builder.build();
+    }
+
+    private static void assertDecoded(JsonNode expected, Error actual, String name) throws IOException {
+        assertEquals(expected.get("code").asText(), actual.code(), name);
+        assertEquals(expected.get("key").isNull() ? java.util.Optional.empty() : java.util.Optional.of(expected.get("key").asText()), actual.messageKey(), name);
+        assertEquals(expected.get("text").isNull() ? java.util.Optional.empty() : java.util.Optional.of(expected.get("text").asText()), actual.text(), name);
+        if (expected.get("details").isNull()) {
+            assertTrue(actual.details().isEmpty(), name + ": " + actual.details());
+        } else {
+            assertEquals(expected.get("details"), RunningPlugin.JSON.readTree(Wire.error(actual).getDetails()), name);
+        }
+        if (expected.get("inner").isNull()) {
+            assertTrue(actual.inner().isEmpty(), name);
+        } else {
+            assertDecoded(expected.get("inner"), actual.inner().orElseThrow(), name + " / inner");
+        }
     }
 
     @Test

@@ -1,7 +1,8 @@
 package com.xihanfun.framework.plugin;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.xihanfun.framework.primitives.json.PrimitivesJson;
@@ -9,7 +10,6 @@ import com.xihanfun.framework.primitives.json.PrimitivesModule;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -18,19 +18,17 @@ import java.util.Optional;
  *
  * <p>配置节是宿主配置源展开后再序列化的 JSON 对象，宿主没有声明配置节时为 {@code {}}；运行时在调配置回调之前核对它是 JSON 对象，
  * 原样交给作者。宿主写出的叶子一律是 JSON 字符串，所以 {@link #decode(Class)} 允许把字符串读成数字（按 JSON 数字的文法）与布尔
- * （只认 {@code true}、{@code false}，ASCII 不区分大小写），成员名不区分大小写，未知成员忽略。
+ * （只认 {@code true}、{@code false}，ASCII 不区分大小写）；成员名按 ASCII 不区分大小写对上属性名，未知成员忽略。
  */
 public final class PluginConfiguration {
     /**
-     * 解码配置节：字符串叶子按 {@link ConfigurationScalars} 读成数字与布尔；成员名不区分大小写（与宿主的 {@code IConfiguration} 一致），
-     * 比较时按 {@link Locale#ROOT} 换小写，不随进程区域变（土耳其语区域里 {@code I} 不换成 {@code i}）。
+     * 解码配置节：字符串叶子按 {@link ConfigurationScalars} 读成数字与布尔；成员名在交给 Jackson 之前由 {@link ConfigurationNames} 按 ASCII
+     * 不区分大小写改写成属性名，Jackson 自己按原样匹配（它的 {@code ACCEPT_CASE_INSENSITIVE_PROPERTIES} 按 Unicode 换小写，比规范宽）。
      */
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .addModule(new PrimitivesModule())
             .addModule(new ConfigurationScalars())
-            .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES)
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-            .defaultLocale(Locale.ROOT)
             .build();
 
     private final String section;
@@ -65,7 +63,7 @@ public final class PluginConfiguration {
     }
 
     /**
-     * 把配置节解码成给定类型：先过共同的 JSON 文本检查，再交给 Jackson。
+     * 把配置节解码成给定类型：先过共同的 JSON 文本检查，再按目标类型把成员名改写成属性名（ASCII 不区分大小写），然后交给 Jackson。
      *
      * @param type 目标类型，通常是记录
      * @param <T> 目标类型
@@ -73,7 +71,10 @@ public final class PluginConfiguration {
      * @throws IOException 配置节不是合法的 JSON 文本，或不合目标类型
      */
     public <T> T decode(Class<T> type) throws IOException {
-        return PrimitivesJson.read(MAPPER, section, Objects.requireNonNull(type, "type"));
+        JavaType target = MAPPER.constructType(Objects.requireNonNull(type, "type"));
+        // 共同检查在原文上做：改写后同一属性的两种写法会成为重复成员，那是 IConfiguration 也会合并的情形，后写的生效
+        PrimitivesJson.read(MAPPER, section, JsonNode.class);
+        return MAPPER.readValue(ConfigurationNames.align(MAPPER, section, target), target);
     }
 
     /**

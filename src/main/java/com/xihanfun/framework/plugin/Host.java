@@ -39,7 +39,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>回调端点在启动时按 {@code XIHAN_PLUGIN_HOST_ADDRESS} 的顺序取第一个本 SDK 能连的（回环 TCP，Linux 上另有 Unix 域套接字），之后不换；
  * 没有能连的端点时每次回调都以 {@code PLUGINS_UNAVAILABLE_001} + {@value PluginMessages#HOST_UNAVAILABLE} 失败、不发请求（{@code handshake.md} §4）。
  * 发出之前在本地按宿主的顺序核对，与宿主给出同样的错误：所需权限既在清单 {@code permissions} 里、也在 {@code Configure} 授予的权限里；
- * 上下文的租户是宿主此刻交给插件、还在处理的某个调用或投递的租户（ADR-0195）。每次回调都带会话令牌，元数据取自所在的调用上下文
+ * 上下文的租户是宿主此刻交给插件、还在处理的某个调用或投递的租户（ADR-0195）；最后，上下文的截止时间已过或已被取消时也不发请求。
+ * 每次回调都带会话令牌，元数据取自所在的调用上下文
  * （追踪、截止时间、已登记的 Baggage），gRPC 调用的截止时间与之相同，取消上下文即取消回调。线程安全；连接在第一次回调时建立。
  */
 public final class Host {
@@ -135,7 +136,7 @@ public final class Host {
     public OperationResponse invoke(Context context, OperationRequest request) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(request, "request");
-        Optional<Error> refused = refuse(context, INVOKE_PERMISSION);
+        Optional<Error> refused = refuse(context, RPC_INVOKE, request.id(), INVOKE_PERMISSION);
         if (refused.isPresent()) {
             return OperationResponse.failed(refused.get());
         }
@@ -175,7 +176,7 @@ public final class Host {
         if (items.isEmpty()) {
             return new ArrayList<>();
         }
-        Optional<Error> refused = refuse(context, PUBLISH_PERMISSION);
+        Optional<Error> refused = refuse(context, RPC_PUBLISH, RPC_PUBLISH, PUBLISH_PERMISSION);
         if (refused.isPresent()) {
             return every(items.size(), Result.fail(refused.get()));
         }
@@ -215,9 +216,11 @@ public final class Host {
     }
 
     /**
-     * 发出之前的本地核对（{@code invocation.md} §5）：先看有没有可用的回调端点，再按宿主的顺序核对权限与租户；不通过即不发请求。
+     * 发出之前的本地核对（{@code invocation.md} §5），依次：有没有可用的回调端点；按宿主的顺序核对权限与租户；最后回调上下文的截止时间已过
+     * 或已被取消时也不发请求，结果与映射表相应的一行相同（截止时间已过按 {@code DeadlineExceeded}，已被取消按取消信号已触发的
+     * {@code Cancelled}）。不通过即不发请求。
      */
-    private Optional<Error> refuse(Context context, String permission) {
+    private Optional<Error> refuse(Context context, String rpc, String operation, String permission) {
         if (endpoint == null) {
             return Optional.of(wire.hostUnavailable(NO_ENDPOINT));
         }
@@ -230,6 +233,13 @@ public final class Host {
         if (tenant.isPresent() && !calls.handed(tenant.get())) {
             return Optional.of(Error.denied(PluginErrors.CALLBACK_DENIED, PluginMessages.CALLBACK_TENANT_DENIED,
                     Map.of("id", wire.pluginId(), "tenant", tenant.get())));
+        }
+        // 截止时间先于取消：截止令牌触发时上下文同样算已取消，而这一行按 DeadlineExceeded
+        if (context.isExpired(Instant.now())) {
+            return Optional.of(mapStatus(wire, rpc, Status.Code.DEADLINE_EXCEEDED.value(), "", true, operation));
+        }
+        if (context.isCancelled()) {
+            return Optional.of(mapStatus(wire, rpc, Status.Code.CANCELLED.value(), "", true, operation));
         }
         return Optional.empty();
     }
@@ -262,9 +272,14 @@ public final class Host {
         Optional<Duration> remaining = context.remainingTime(Instant.now());
         HostGrpc.HostBlockingStub stub = remaining.map(duration -> base.withDeadlineAfter(Math.max(1, nanos(duration)), TimeUnit.NANOSECONDS))
                 .orElse(base);
-        // 回调在 gRPC 自己的可取消上下文里执行：调用上下文取消时它随之取消，正在进行的回调以 Cancelled 结束
+        // 回调在 gRPC 自己的可取消上下文里执行：调用方取消时它随之取消，正在进行的回调以 Cancelled 结束。截止时间到了不在这里取消：
+        // gRPC 调用带着同一个截止时间，由 grpc-java 在本端以 DeadlineExceeded 结束，结果只按映射表，不另按令牌改写（invocation.md §5）
         io.grpc.Context.CancellableContext scope = io.grpc.Context.current().withCancellation();
-        Registration registration = context.onCancelled(() -> scope.cancel(null));
+        Registration registration = context.onCancelled(() -> {
+            if (context.cancellation().map(Error::code).filter(InvocationErrors.CANCELLED::equals).isPresent()) {
+                scope.cancel(null);
+            }
+        });
         try {
             Callable<T> task = () -> invocation.invoke(stub);
             return Result.ok(scope.call(task));
