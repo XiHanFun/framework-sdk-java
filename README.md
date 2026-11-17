@@ -2,26 +2,26 @@
 
 [XiHan Framework Spec](https://github.com/XiHanFun/framework-spec) 的 Java 实现：原语层、清单、调用上下文、管道与操作契约。用它可以把同一套原语用在 JVM 应用里；下一轮加上进程外插件运行时后，也能写在 .NET 宿主（[XiHan.Framework](https://github.com/XiHanFun/XiHan.Framework)）里运行的 Java 插件。规范以 submodule 放在 `spec/`，一致性由规范仓库的向量验证；形状与语义的参照是 [framework-sdk-go](https://github.com/XiHanFun/framework-sdk-go)。
 
-JDK 21+，Maven 坐标 `com.xihanfun:xihan-framework-<模块>`（Maven Central 命名空间 `com.xihanfun` 已验证，尚未发布）：
+JDK 21+，Maven 坐标 `com.xihanfun:xihan-framework`（Maven Central 命名空间 `com.xihanfun` 已验证，尚未发布）。整个 SDK 是一个构件，与其他语言的 SDK 一样只有一个包，JPMS 模块名 `com.xihanfun.framework`：
 
 ```xml
 <dependency>
   <groupId>com.xihanfun</groupId>
-  <artifactId>xihan-framework-operation</artifactId>
+  <artifactId>xihan-framework</artifactId>
   <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
-| 模块 | Java 包 | 内容 | 规范 |
-| --- | --- | --- | --- |
-| `xihan-framework-primitives` | `com.xihanfun.framework.primitives` | `Error` / `ErrorCode`、`Result<T>`、`Maybe<T>`、`TypedId<Tag, V>`、`LifecycleState`、`PipelineStage`、`Stability`、`BaggageKeys`、消息键与模板（`MessageTemplate`、`MessageCatalog`、`MessageScope`）、`FrameworkException`、`FrameworkInfo` | RFC-0001、RFC-0010、`conventions/` |
-| | `com.xihanfun.framework.primitives.json` | 线上 JSON 编码：Jackson 模块 `PrimitivesModule`（Jackson 是可选依赖） | RFC-0001「线上编码」 |
-| `xihan-framework-manifest` | `com.xihanfun.framework.manifest` | `xihan.manifest.json` 的模型、按 Schema 严格读取、规范化输出与校验，能力声明与依赖文本 | RFC-0002、`manifest/manifest.schema.json` |
-| `xihan-framework-invocation` | `com.xihanfun.framework.invocation` | `Context`：取消与截止时间（按令牌归因为 `KERNEL_TIMEOUT_001` / `KERNEL_CANCELLED_001`，可登记回调）、W3C 追踪、已登记的 Baggage、对象袋 `Items`、按派生传递的值 | RFC-0003 |
-| `xihan-framework-pipeline` | `com.xihanfun.framework.pipeline` | 十一阶段的 `PipelineBuilder`：`use` / `useAt` / `useNamedInstance`、`before` / `after`（类型名或实例名）、`describe` / `dump`、`build`；排序规则与错误码 `KERNEL_PIPELINE_00x` | RFC-0004 |
-| `xihan-framework-operation` | `com.xihanfun.framework.operation` | `OperationContract`、`OperationSchema`、`OperationHandler<Req, Res>`、容量 10000 的 `OperationRegistry`、经完整管道执行的 `OperationInvoker`（XGI：JSON 请求与响应，另有类型化入口） | RFC-0011 |
+| Java 包 | 内容 | 规范 |
+| --- | --- | --- |
+| `com.xihanfun.framework.primitives` | `Error` / `ErrorCode`、`Result<T>`、`Maybe<T>`、`TypedId<Tag, V>`、`LifecycleState`、`PipelineStage`、`Stability`、`BaggageKeys`、消息键与模板（`MessageTemplate`、`MessageCatalog`、`MessageScope`）、`FrameworkException`、`FrameworkInfo` | RFC-0001、RFC-0010、`conventions/` |
+| `com.xihanfun.framework.primitives.json` | 线上 JSON 编码：Jackson 模块 `PrimitivesModule` | RFC-0001「线上编码」 |
+| `com.xihanfun.framework.manifest` | `xihan.manifest.json` 的模型、按 Schema 严格读取、规范化输出与校验，能力声明与依赖文本 | RFC-0002、`manifest/manifest.schema.json` |
+| `com.xihanfun.framework.invocation` | `Context`：取消与截止时间（按令牌归因为 `KERNEL_TIMEOUT_001` / `KERNEL_CANCELLED_001`，可登记回调）、W3C 追踪、已登记的 Baggage、对象袋 `Items`、按派生传递的值 | RFC-0003 |
+| `com.xihanfun.framework.pipeline` | 十一阶段的 `PipelineBuilder`：`use` / `useAt` / `useNamedInstance`、`before` / `after`（类型名或实例名）、`describe` / `dump`、`build`；排序规则与错误码 `KERNEL_PIPELINE_00x` | RFC-0004 |
+| `com.xihanfun.framework.operation` | `OperationContract`、`OperationSchema`、`OperationHandler<Req, Res>`、容量 10000 的 `OperationRegistry`、经完整管道执行的 `OperationInvoker`（XGI：JSON 请求与响应，另有类型化入口） | RFC-0011 |
 
-依赖方向：`operation → pipeline → invocation → primitives`，`manifest → primitives`；每个模块带 `module-info.java`。
+包之间的依赖方向：`operation → pipeline → invocation → primitives`，`manifest → primitives`。外部依赖只有 `jackson-databind`，模块描述里是 `requires transitive`。
 
 ## 在 Java 应用里用原语
 
@@ -81,7 +81,7 @@ OperationResponse response = invoker.invoke(context, OperationRequest.of("orders
 
 **取消与截止时间自己建模。** `Context` 有两个令牌：截止令牌由定时器在截止时间触发，外部令牌由 `CancellableContext.cancel()` 触发；父级取消连带子级，子级取消不影响父级。归因只看令牌（RFC-0003 规则 1、RFC-0004、ADR-0095）：截止令牌已触发即 `KERNEL_TIMEOUT_001`，不论调用方是否也已取消；只有外部令牌触发时为 `KERNEL_CANCELLED_001`。`onCancelled` 登记回调（已取消时立即执行），`awaitCancellation` 在虚拟线程上等待；`withCancellation` / `withDeadline` / `withTimeout` 返回的 `CancellableContext` 用完要关闭（try-with-resources），免得长寿命的父级积攒已结束的子级。
 
-**JSON：Jackson。** Java 标准库没有 JSON；XGI 载荷、清单读取与线上编码都需要它。选 `jackson-databind` 是因为它是 JVM 上事实标准、本身是 JPMS 模块、支持记录类型，grpc-java 等常用库的使用者通常已经有它。原语核心类型不依赖 Jackson（RFC-0001：原语层不含序列化代码）：共同的 JSON 文本检查 `JsonText` 是手写的逐字节检查器，编码在 `primitives.json` 包里，Jackson 在 primitives 模块是可选依赖；manifest 只用树模型按 Schema 逐项核对（`ManifestShape`）、不做反射绑定，写出是手写的排版；operation 用 `OperationJson.newMapper()`——注册原语编码、忽略未知字段、类型不符一律失败——并在反序列化之前按请求类型以文本顺序核对载荷（`RequestShape`），报错的先后不随 Jackson 的内部路径变。模块路径上的应用要把请求与响应类型所在的包 `opens` 给 `com.fasterxml.jackson.databind`。
+**JSON：Jackson。** Java 标准库没有 JSON；XGI 载荷、清单读取与线上编码都需要它。选 `jackson-databind` 是因为它是 JVM 上事实标准、本身是 JPMS 模块、支持记录类型，grpc-java 等常用库的使用者通常已经有它。原语核心类型不依赖 Jackson（RFC-0001：原语层不含序列化代码）：共同的 JSON 文本检查 `JsonText` 是手写的逐字节检查器，编码在 `primitives.json` 包里；manifest 只用树模型按 Schema 逐项核对（`ManifestShape`）、不做反射绑定，写出是手写的排版；operation 用 `OperationJson.newMapper()`——注册原语编码、忽略未知字段、类型不符一律失败——并在反序列化之前按请求类型以文本顺序核对载荷（`RequestShape`），报错的先后不随 Jackson 的内部路径变。模块路径上的应用要把请求与响应类型所在的包 `opens` 给 `com.fasterxml.jackson.databind`。
 
 **可空性。** 公开成员不接受也不返回 `null`：可能没有的值以 `Optional` 返回（`findBaggage`、`find`、`tenant()`），需要线上编码的数据字段用 `Maybe`（编码为值或 `null`，对象里缺这个字段也解码为无值），集合没有时是空集合；参数传 `null` 抛 `NullPointerException`。
 
@@ -111,7 +111,7 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/roo
 
 ## 状态
 
-`0.1.0-SNAPSHOT`：原语、清单、调用上下文、管道与操作五个模块可用；进程外插件运行时（`plugin`，`xihan.plugin.v1`，grpc-java）与远程 Provider 的操作集（首个是 `caching.distributed@1`）规划中，示例随它们提供。正式发布时去掉 `-SNAPSHOT`，以 `v0.1.0` 标签发布到 Maven Central。
+`0.1.0-SNAPSHOT`：原语、清单、调用上下文、管道与操作可用；进程外插件运行时（`plugin`，`xihan.plugin.v1`，grpc-java）与远程 Provider 的操作集（首个是 `caching.distributed@1`）规划中，示例随它们提供。正式发布时去掉 `-SNAPSHOT`，以 `v0.1.0` 标签发布到 Maven Central。
 
 ## 参与
 
