@@ -5,35 +5,35 @@ import java.io.UncheckedIOException;
 import java.util.Map;
 
 /**
- * 插件运行时的消息键与内置目录（RFC-0010）：10 种区域各一个语言文件 {@code Localization/<区域>.json}，随 SDK 打包。
+ * 插件运行时的消息键与内置目录（RFC-0010，{@code invocation.md} §8）：10 种区域各一个语言文件 {@code Localization/<区域>.json}，随 SDK 打包。
  *
- * <p>前五个键与参数和参考实现的插件协议目录相同，宿主按它们翻译插件交回的错误；{@link #HOST_UNAVAILABLE} 与
- * {@link #EVENT_UNSUBSCRIBED} 是本 SDK 的键，宿主的目录里没有时显示为「键 (参数)」。目录不随握手发给宿主，
- * 免得与宿主自己的同名键冲突；运行时只用它填写协议 {@code Error.text}。
+ * <p>这些键、参数与错误码是规范定下的、SDK 运行时与宿主共用的键（向量 {@code plugin-messages.json}），参数就是错误的 {@code details}，
+ * 不另加成员；{@code id} 一律是插件的清单 ID。宿主有这些键的目录，SDK 不随握手发送它们（{@code handshake.md} §3 第 6 条），
+ * 带这些键的错误交给宿主时 {@code text} 留空、由宿主翻译成调用方的语言。本目录供插件在本地渲染，例如写日志或交给不经宿主的调用方。
  */
 public final class PluginMessages {
     /** 目录名。 */
     public static final String CATALOG_NAME = "plugins.protocol";
 
-    /** 插件未就绪或正在停止；参数 {@code id}（清单 ID）与 {@code state}（生命周期状态名）。 */
+    /** 不在可服务状态（{@code Ready}、{@code Degraded}）时到达的调用与投递；参数 {@code id} 与 {@code state}（生命周期状态名），错误码 {@code PLUGINS_UNAVAILABLE_001}。 */
     public static final String UNAVAILABLE = "plugins.process.unavailable";
 
-    /** 配置、启动、停止或回调失败；参数 {@code id}、{@code phase}、{@code reason}。 */
+    /** 生命周期或健康回调抛出、配置节不是 JSON 对象、对方写来的错误不合法、没有对应的 gRPC 状态；参数 {@code id}、{@code phase}、{@code reason}，错误码 {@code PLUGINS_UNEXPECTED_001}。 */
     public static final String FAILED = "plugins.process.failed";
 
-    /** 回调所需的权限未在清单声明或未被授予；参数 {@code id} 与 {@code permission}。 */
+    /** 回调所需的权限未在清单声明或未被授予；参数 {@code id} 与 {@code permission}，错误码 {@code PLUGINS_DENIED_002}。 */
     public static final String CALLBACK_DENIED = "plugins.callback.denied";
 
-    /** 回调或发布带了宿主没有交给插件的租户；参数 {@code id} 与 {@code tenant}。 */
+    /** 回调带了不属于在途调用的租户；参数 {@code id} 与 {@code tenant}，错误码 {@code PLUGINS_DENIED_002}。 */
     public static final String CALLBACK_TENANT_DENIED = "plugins.callback.tenant_denied";
 
-    /** 回调的会话令牌被宿主拒绝；没有参数。 */
+    /** 宿主拒绝了回调的会话令牌；没有参数，错误码 {@code PLUGINS_DENIED_002}。 */
     public static final String SESSION_INVALID = "plugins.callback.session_invalid";
 
-    /** 宿主回调端点不可达或本 SDK 连不了它的网络类型；参数 {@code id} 与 {@code reason}。 */
+    /** 回调连不上宿主，或没有可用的回调端点；参数 {@code id} 与 {@code reason}，错误码 {@code PLUGINS_UNAVAILABLE_001}。 */
     public static final String HOST_UNAVAILABLE = "plugins.host.unavailable";
 
-    /** 投递的消息没有以这种方式订阅、类型也匹配的处理器；参数 {@code id}、{@code topic}、{@code type}、{@code mode}。 */
+    /** 投递找不到（主题，方式，类型）匹配的订阅；参数 {@code id}、{@code topic}、{@code type}、{@code mode}，错误码 {@code KERNEL_NOTFOUND_001}。 */
     public static final String EVENT_UNSUBSCRIBED = "plugins.event.unsubscribed";
 
     /** 内置目录；类首次使用时读语言文件。 */

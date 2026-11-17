@@ -2,57 +2,55 @@ package com.xihanfun.framework.plugin;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.protobuf.ByteString;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.plugin.v1.PluginProto;
 import com.xihanfun.framework.primitives.BaggageKeys;
 import com.xihanfun.framework.primitives.Error;
+import com.xihanfun.framework.primitives.ErrorCode;
 import com.xihanfun.framework.primitives.JsonText;
 import com.xihanfun.framework.primitives.LifecycleState;
-import com.xihanfun.framework.primitives.MessageCatalog;
+import com.xihanfun.framework.primitives.MessageTemplate;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
-import com.xihanfun.framework.primitives.json.PrimitivesJson;
 import com.xihanfun.framework.primitives.json.PrimitivesModule;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeFormatterBuilder;
-import java.time.format.DateTimeParseException;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 
 /**
  * 协议消息与 SDK 类型之间的转换（{@code invocation.md} §2、§3）：错误按 RFC-0001 的线上编码一一对应，上下文按 RFC-0003 平铺。
  */
 final class Wire {
-    /** 细节按值模型写出与读回：经原语的线上编码，不另写一份数字规则。 */
+    /** 细节按值模型写出：经原语的线上编码，不另写一份数字规则。 */
     private static final ObjectMapper JSON = new ObjectMapper().registerModule(new PrimitivesModule());
 
-    /** RFC 3339 的时间：{@code T} 与 {@code Z} 不区分大小写。 */
-    private static final DateTimeFormatter RFC_3339 = new DateTimeFormatterBuilder().parseCaseInsensitive()
-            .append(DateTimeFormatter.ISO_OFFSET_DATE_TIME).toFormatter();
+    /** 截止时间换算成 UTC 之后（不计小数）允许的最早时刻（{@code invocation.md} §2）。 */
+    private static final Instant MIN_DEADLINE = Instant.parse("0001-01-01T00:00:00Z");
+
+    /** 截止时间换算成 UTC 之后（不计小数）允许的最晚时刻。 */
+    private static final Instant MAX_DEADLINE = Instant.parse("9999-12-31T23:59:59Z");
+
+    /** 写出时能表示的最晚时刻：七位小数的最大值。 */
+    private static final Instant MAX_WRITTEN_DEADLINE = MAX_DEADLINE.plusNanos(999_999_900);
+
+    /** 写出截止时间的固定偏移（.NET 的 {@code O} 格式在 UTC 时的写法）。 */
+    private static final String UTC_OFFSET = "+00:00";
 
     private final String pluginId;
 
-    /** 填写 {@code Error.text} 用的目录：插件自己的在前，运行时内置的在后。 */
-    private final List<MessageCatalog> catalogs;
-
-    /** 填写 {@code Error.text} 用的区域：宿主的默认区域。 */
-    private final String locale;
-
-    Wire(String pluginId, List<PluginCatalog> authored, String locale) {
+    Wire(String pluginId) {
         this.pluginId = pluginId;
-        List<MessageCatalog> all = new ArrayList<>();
-        authored.forEach(catalog -> all.add(catalog.messages()));
-        all.add(PluginMessages.catalog().messages());
-        this.catalogs = List.copyOf(all);
-        this.locale = locale;
     }
 
     String pluginId() {
@@ -69,11 +67,16 @@ final class Wire {
     }
 
     /**
-     * 编码错误：{@code text} 是已解析的文案（RFC-0001 线上编码的必填 {@code message}），{@code details} 是按值模型写出的 JSON 对象文本。
+     * 写出错误（{@code invocation.md} §3）：{@code code}、{@code message_key} 原样；带消息键的错误 {@code text} 留空，由宿主按目录翻译成调用方的语言
+     * （RFC-0010），只有自由文本错误写 {@code text}；{@code details} 是按值模型写出的 JSON 对象文本，没有时为空；{@code inner} 同样写出。
      */
-    PluginProto.Error error(Error error) {
-        PluginProto.Error.Builder builder = PluginProto.Error.newBuilder().setCode(error.code()).setText(text(error));
-        error.messageKey().ifPresent(builder::setMessageKey);
+    static PluginProto.Error error(Error error) {
+        PluginProto.Error.Builder builder = PluginProto.Error.newBuilder().setCode(error.code());
+        if (error.messageKey().isPresent()) {
+            builder.setMessageKey(error.messageKey().get());
+        } else {
+            builder.setText(error.text().orElse(error.code()));
+        }
         if (!error.details().isEmpty()) {
             builder.setDetails(details(error));
         }
@@ -82,73 +85,105 @@ final class Wire {
     }
 
     /**
-     * 解析文案：已有文案的原样；否则先按插件自己的目录与内置目录在宿主默认区域解析，再退回进程默认的解析器与「键 (参数)」的描述。
+     * 读入宿主交回的结果（回调用，{@code invocation.md} §3）：{@code ok} 为假却没有 {@code error} 时为 {@code PLUGINS_UNEXPECTED_001} +
+     * {@value PluginMessages#FAILED}（{@code reason} 为 {@code the host reported a failure without an error}）。
+     *
+     * @param phase 失败归属的阶段：操作 ID 或 {@code publish}
      */
-    String text(Error error) {
-        if (error.text().isPresent()) {
-            return error.text().get();
-        }
-        if (error.messageKey().isPresent()) {
-            for (MessageCatalog catalog : catalogs) {
-                Optional<String> resolved = catalog.resolve(error.messageKey().get(), locale, error.details());
-                if (resolved.isPresent()) {
-                    return resolved.get();
-                }
-            }
-        }
-        return error.message();
-    }
-
-    /**
-     * 还原宿主交回的结果（回调用）：失败而没有错误、或错误不合 RFC-0001 的编码时为 {@code PLUGINS_UNEXPECTED_001}。
-     */
-    Result<Unit> fromStatus(PluginProto.Status status, String phase) {
+    Result<Unit> readStatus(PluginProto.Status status, String phase) {
         if (status != null && status.getOk()) {
             return Result.success();
         }
         if (status == null || !status.hasError()) {
-            return Result.fail(failed(phase, "the host returned a failed status without an error"));
+            return Result.fail(failed(phase, "the host reported a failure without an error"));
         }
-        try {
-            return Result.fail(fromError(status.getError()));
-        } catch (IOException | IllegalArgumentException invalid) {
-            return Result.fail(failed(phase, "the host returned an error that is not RFC-0001 encoded"));
-        }
+        return Result.fail(readError(status.getError()));
     }
 
     /**
-     * 按 RFC-0001 的线上编码还原错误：拼成 {@code {"code", "message", "messageKey", "details", "inner"}} 再经原语的解码器读，
-     * 细节先过共同的 JSON 文本检查（重复成员在读成树之前就要拒绝）。
+     * 读入对方写来的错误（{@code invocation.md} §3）：{@code code} 不合错误码文法时整个错误换成 {@code PLUGINS_UNEXPECTED_001} +
+     * {@value PluginMessages#FAILED}（{@code phase} 为 {@code invoke}）；{@code message_key} 合消息键文法的按键处理，否则成为自由文本错误，
+     * 文案取 {@code text}，为空时取 {@code code}；{@code details} 为空、通不过共同 JSON 读取检查或不是对象时当作没有细节；{@code inner} 同此。
      */
-    static Error fromError(PluginProto.Error error) throws IOException {
-        return PrimitivesJson.read(JSON, JSON.writeValueAsBytes(errorNode(error, 0)), Error.class);
+    Error readError(PluginProto.Error error) {
+        String code = error.getCode();
+        if (!ErrorCode.isValid(code)) {
+            return failed("invoke", "invalid error code '" + code + "'");
+        }
+        Map<String, Object> details = readDetails(error.getDetails());
+        // 内部错误的嵌套层数受 protobuf 解码的递归上限约束，递归不会无界
+        Optional<Error> inner = error.hasInner() ? Optional.of(readError(error.getInner())) : Optional.empty();
+        String key = error.getMessageKey();
+        if (!key.isEmpty() && MessageTemplate.isValidKey(key)) {
+            return inner.map(nested -> Error.of(code, key, details, nested)).orElseGet(() -> Error.of(code, key, details));
+        }
+        String text = error.getText().isEmpty() ? code : error.getText();
+        return inner.map(nested -> Error.literal(code, text, details, nested)).orElseGet(() -> Error.literal(code, text, details));
     }
 
-    private static ObjectNode errorNode(PluginProto.Error error, int depth) throws IOException {
-        if (depth >= JsonText.MAX_DEPTH) {
-            throw new IOException("The error nests more than " + JsonText.MAX_DEPTH + " levels.");
+    /**
+     * 读细节：先过共同的 JSON 读取检查（RFC-0001，重复成员、超过 64 层、不合法的 Unicode 都不通过），再要求是对象；
+     * 数字按值模型读成 64 位整数或双精度浮点。任何一步不合都当作没有细节。
+     */
+    static Map<String, Object> readDetails(String text) {
+        if (text.isEmpty()) {
+            return Map.of();
         }
-        ObjectNode node = JSON.createObjectNode();
-        node.put("code", error.getCode());
-        // 线上的 message 必填非空：宿主没给文案时用键或码，接收方仍按键再翻译
-        String message = !error.getText().isEmpty() ? error.getText()
-                : !error.getMessageKey().isEmpty() ? error.getMessageKey()
-                : error.getCode();
-        node.put("message", message);
-        if (!error.getMessageKey().isEmpty()) {
-            node.put("messageKey", error.getMessageKey());
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        if (JsonText.check(bytes).isPresent()) {
+            return Map.of();
         }
-        if (!error.getDetails().isEmpty()) {
-            byte[] details = error.getDetails().getBytes(StandardCharsets.UTF_8);
-            if (JsonText.check(details).isPresent()) {
-                throw new IOException("The error details are not valid JSON text.");
+        try {
+            JsonNode node = JSON.readTree(bytes);
+            if (node == null || !node.isObject()) {
+                return Map.of();
             }
-            node.set("details", JSON.readTree(details));
+            return objectValue(node);
+        } catch (IOException | ArithmeticException invalid) {
+            return Map.of();
         }
-        if (error.hasInner()) {
-            node.set("inner", errorNode(error.getInner(), depth + 1));
+    }
+
+    private static Map<String, Object> objectValue(JsonNode node) {
+        TreeMap<String, Object> map = new TreeMap<>();
+        for (Map.Entry<String, JsonNode> member : node.properties()) {
+            map.put(member.getKey(), value(member.getValue()));
         }
-        return node;
+        return map;
+    }
+
+    private static Object value(JsonNode node) {
+        if (node.isObject()) {
+            return objectValue(node);
+        }
+        if (node.isArray()) {
+            List<Object> list = new ArrayList<>(node.size());
+            node.forEach(element -> list.add(value(element)));
+            return list;
+        }
+        if (node.isTextual()) {
+            return node.textValue();
+        }
+        if (node.isBoolean()) {
+            return node.booleanValue();
+        }
+        if (node.isIntegralNumber()) {
+            // 值模型：64 位范围内的整数原样，超出时按双精度浮点（RFC-0001「Result」）
+            BigInteger integer = node.bigIntegerValue();
+            if (integer.bitLength() < Long.SIZE) {
+                return integer.longValue();
+            }
+            return integer.doubleValue();
+        }
+        if (node.isNumber()) {
+            double number = node.doubleValue();
+            if (!Double.isFinite(number)) {
+                // 超出双精度范围的数读不成值模型里的数，与原语的严格读取一样不收
+                throw new ArithmeticException("The number is out of the double range.");
+            }
+            return number;
+        }
+        return null;
     }
 
     private static String details(Error error) {
@@ -161,67 +196,176 @@ final class Wire {
         }
     }
 
+    /** {@code PLUGINS_UNAVAILABLE_001} + {@value PluginMessages#UNAVAILABLE}：不在可服务状态（{@code lifecycle.md} §7.3）。 */
     Error unavailable(LifecycleState state) {
         return Error.unavailable(PluginErrors.UNAVAILABLE, PluginMessages.UNAVAILABLE, Map.of("id", pluginId, "state", state.stateName()));
     }
 
+    /** {@code PLUGINS_UNEXPECTED_001} + {@value PluginMessages#FAILED}；{@code phase} 一律小写或操作 ID（{@code invocation.md} §8）。 */
     Error failed(String phase, String reason) {
         return Error.unexpected(PluginErrors.UNEXPECTED, PluginMessages.FAILED, Map.of("id", pluginId, "phase", phase, "reason", reason));
     }
 
-    Error failed(String phase, String reason, Error inner) {
-        return Error.unexpected(PluginErrors.UNEXPECTED, PluginMessages.FAILED,
-                Map.of("id", pluginId, "phase", phase, "reason", reason), inner);
+    /** {@code PLUGINS_UNAVAILABLE_001} + {@value PluginMessages#HOST_UNAVAILABLE}：回调连不上宿主（{@code invocation.md} §5）。 */
+    Error hostUnavailable(String reason) {
+        return Error.unavailable(PluginErrors.UNAVAILABLE, PluginMessages.HOST_UNAVAILABLE, Map.of("id", pluginId, "reason", reason));
+    }
+
+    /**
+     * 回调抛出时的 {@code reason}（{@code lifecycle.md} §7.6）：异常的简单类型名，不带包名，不带异常的文本（文本只进 stderr 日志）。
+     * 匿名类与局部类没有简单名，取去掉包名的二进制名（如 {@code EchoPlugin$1}）。
+     */
+    static String typeName(Throwable thrown) {
+        Class<?> type = thrown.getClass();
+        String simple = type.getSimpleName();
+        if (!simple.isEmpty()) {
+            return simple;
+        }
+        String name = type.getName();
+        return name.substring(name.lastIndexOf('.') + 1);
     }
 
     // ---- 上下文 ----
 
     /**
-     * 从协议元数据还原调用上下文（{@code invocation.md} §2）：追踪取 {@code trace_parent}，截止时间取 {@code deadline} 与 gRPC 截止时间中
-     * 较早的一个（二者本应相同，下游的截止时间不晚于上游，RFC-0003 规则 2）；Baggage 只收已登记的键（RFC-0003 规则 3），
-     * 不可接受的值由构建器丢弃。
+     * 从协议元数据还原调用上下文（{@code invocation.md} §2）：{@code trace_parent} 按 RFC-0003 的文法取，不合文法即没有父 Span；
+     * {@code trace_state} 不进上下文；Baggage 只收已登记的键，不可接受的值由构建器丢弃；截止时间取 {@code deadline}（读不出当作没有）
+     * 与 gRPC 调用自身截止时间中较早的一个。
      */
     static Context.Builder context(PluginProto.InvocationMetadata metadata, Optional<Instant> transportDeadline) {
         Context.Builder builder = Context.builder();
-        Optional<Instant> deadline = transportDeadline;
+        String declared = "";
         if (metadata != null) {
-            if (!metadata.getTraceParent().isEmpty()) {
-                builder.traceParent(metadata.getTraceParent());
-            }
-            Optional<Instant> declared = parseDeadline(metadata.getDeadline());
-            if (declared.isPresent() && (deadline.isEmpty() || declared.get().isBefore(deadline.get()))) {
-                deadline = declared;
-            }
+            builder.traceParent(metadata.getTraceParent());
+            declared = metadata.getDeadline();
             for (Map.Entry<String, String> entry : metadata.getBaggageMap().entrySet()) {
                 if (BaggageKeys.isRegistered(entry.getKey())) {
                     builder.baggage(entry.getKey(), entry.getValue());
                 }
             }
         }
-        deadline.ifPresent(builder::deadline);
+        effectiveDeadline(declared, transportDeadline).ifPresent(builder::deadline);
         return builder;
     }
 
     /**
-     * 把调用上下文写成协议元数据（RFC-0003 规则 3）：追踪、截止时间（UTC 的 RFC 3339）与已登记的 Baggage。
+     * 把调用上下文写成回调的元数据（{@code invocation.md} §5）：当前 Span 的 traceparent、按 §2 写法的截止时间、上下文里已登记的 Baggage，
+     * {@code trace_state} 为空。
      */
     static PluginProto.InvocationMetadata metadata(Context context) {
         PluginProto.InvocationMetadata.Builder builder = PluginProto.InvocationMetadata.newBuilder().setTraceParent(context.traceParent());
-        context.deadline().ifPresent(deadline -> builder.setDeadline(DateTimeFormatter.ISO_INSTANT.format(deadline)));
+        context.deadline().ifPresent(deadline -> builder.setDeadline(formatDeadline(deadline)));
         builder.putAllBaggage(context.withoutUnregisteredBaggage().baggage());
         return builder.build();
     }
 
-    /** 解析 RFC 3339 的截止时间；空串或写法不合时没有。 */
+    /**
+     * 生效的截止时间（{@code invocation.md} §2）：{@code metadata} 按 {@link #parseDeadline(String)} 读、读不出当作没有，与 gRPC 调用自身的截止时间
+     * 取较早的一个；两者都没有时没有截止时间。
+     */
+    static Optional<Instant> effectiveDeadline(String metadata, Optional<Instant> transport) {
+        Optional<Instant> declared = parseDeadline(metadata);
+        if (declared.isPresent() && transport.isPresent()) {
+            return Optional.of(transport.get().isBefore(declared.get()) ? transport.get() : declared.get());
+        }
+        return declared.isPresent() ? declared : transport;
+    }
+
+    /**
+     * 严格读 {@code InvocationMetadata.deadline}（{@code invocation.md} §2）：
+     * {@code ^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?([Zz]|[+-][0-9]{2}:[0-9]{2})\z}，
+     * 年 0001–9999、月日按公历（含闰年）、时 00–23、分 00–59、秒 00–59（不认闰秒）、偏移的时 00–23 与分 00–59，
+     * 换算成 UTC 之后（不计小数）在 {@code 0001-01-01T00:00:00} 到 {@code 9999-12-31T23:59:59} 之间。{@link Instant} 精确到纳秒，九位小数不必截断。
+     *
+     * @return UTC 时刻；空串、{@code null} 或读不出时为空
+     */
     static Optional<Instant> parseDeadline(String text) {
-        if (text == null || text.isEmpty()) {
+        // 固定部分 yyyy-MM-ddTHH:mm:ss 是 19 个字符，之后至少还有一个字符的偏移
+        if (text == null || text.length() < 20 || text.charAt(4) != '-' || text.charAt(7) != '-'
+                || (text.charAt(10) != 'T' && text.charAt(10) != 't') || text.charAt(13) != ':' || text.charAt(16) != ':') {
             return Optional.empty();
         }
-        try {
-            return Optional.of(OffsetDateTime.parse(text, RFC_3339).toInstant());
-        } catch (DateTimeParseException invalid) {
+        int year = digits(text, 0, 4);
+        int month = digits(text, 5, 7);
+        int day = digits(text, 8, 10);
+        int hour = digits(text, 11, 13);
+        int minute = digits(text, 14, 16);
+        int second = digits(text, 17, 19);
+        if (year < 1 || month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month) || hour < 0 || hour > 23
+                || minute < 0 || minute > 59 || second < 0 || second > 59) {
             return Optional.empty();
         }
+        int position = 19;
+        int nanos = 0;
+        if (text.charAt(position) == '.') {
+            int end = position + 1;
+            while (end < text.length() && text.charAt(end) >= '0' && text.charAt(end) <= '9') {
+                end++;
+            }
+            int count = end - position - 1;
+            if (count < 1 || count > 9) {
+                return Optional.empty();
+            }
+            nanos = digits(text, position + 1, end);
+            // 不足九位的小数按右补零换算成纳秒
+            for (int index = count; index < 9; index++) {
+                nanos *= 10;
+            }
+            position = end;
+        }
+        String rest = text.substring(position);
+        int offset;
+        if (rest.equals("Z") || rest.equals("z")) {
+            offset = 0;
+        } else if (rest.length() == 6 && (rest.charAt(0) == '+' || rest.charAt(0) == '-') && rest.charAt(3) == ':') {
+            int offsetHours = digits(rest, 1, 3);
+            int offsetMinutes = digits(rest, 4, 6);
+            if (offsetHours < 0 || offsetHours > 23 || offsetMinutes < 0 || offsetMinutes > 59) {
+                return Optional.empty();
+            }
+            offset = (offsetHours * 60 + offsetMinutes) * 60 * (rest.charAt(0) == '-' ? -1 : 1);
+        } else {
+            return Optional.empty();
+        }
+        // 范围按换算成 UTC 之后、不计小数的时刻判定，所以 9999-12-31T23:59:59.999999999Z 仍然合法
+        Instant utc = LocalDateTime.of(year, month, day, hour, minute, second).toInstant(ZoneOffset.UTC).minusSeconds(offset);
+        if (utc.isBefore(MIN_DEADLINE) || utc.isAfter(MAX_DEADLINE)) {
+            return Optional.empty();
+        }
+        return Optional.of(utc.plusNanos(nanos));
+    }
+
+    /**
+     * 按 .NET 的 {@code O} 格式写出截止时间（{@code invocation.md} §2）：换算成 UTC、七位小数、{@code +00:00} 偏移；比 100 纳秒更细的部分截断、
+     * 不进位，小数不足七位补零。超出 {@code 0001}–{@code 9999} 年的时刻夹到这个范围的两端，写出的文本总能被对方读出。
+     */
+    static String formatDeadline(Instant deadline) {
+        Instant clamped = deadline.isBefore(MIN_DEADLINE) ? MIN_DEADLINE : deadline.isAfter(MAX_WRITTEN_DEADLINE) ? MAX_WRITTEN_DEADLINE : deadline;
+        OffsetDateTime utc = clamped.atOffset(ZoneOffset.UTC);
+        return String.format(Locale.ROOT, "%04d-%02d-%02dT%02d:%02d:%02d.%07d%s", utc.getYear(), utc.getMonthValue(),
+                utc.getDayOfMonth(), utc.getHour(), utc.getMinute(), utc.getSecond(), utc.getNano() / 100, UTC_OFFSET);
+    }
+
+    /** 读一段全是 ASCII 数字的文本（全角数字等其他数字字符不算）；有别的字符时为 -1。 */
+    private static int digits(String text, int from, int to) {
+        int value = 0;
+        for (int index = from; index < to; index++) {
+            char c = text.charAt(index);
+            if (c < '0' || c > '9') {
+                return -1;
+            }
+            value = value * 10 + (c - '0');
+        }
+        return value;
+    }
+
+    /** 公历某年某月的天数：四年一闰、百年不闰、四百年再闰。 */
+    private static int daysInMonth(int year, int month) {
+        return switch (month) {
+            case 2 -> (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) ? 29 : 28;
+            case 4, 6, 9, 11 -> 30;
+            default -> 31;
+        };
     }
 
     // ---- 信封与健康 ----
@@ -260,7 +404,7 @@ final class Wire {
         return builder.build();
     }
 
-    PluginProto.HealthResponse health(PluginHealth health) {
+    static PluginProto.HealthResponse health(PluginHealth health) {
         PluginProto.HealthResponse.Builder builder = PluginProto.HealthResponse.newBuilder()
                 .setState(PluginProto.LifecycleState.forNumber(health.state().number()));
         for (HealthItem item : health.items()) {

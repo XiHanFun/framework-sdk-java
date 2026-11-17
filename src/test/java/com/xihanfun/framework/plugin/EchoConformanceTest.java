@@ -34,9 +34,9 @@ import org.junit.jupiter.api.io.TempDir;
  * 类路径写进 Java 的参数文件。
  */
 class EchoConformanceTest {
-    /** 运行器的 8 个用例。 */
-    private static final List<String> CASES = List.of("handshake", "refusal", "session", "lifecycle", "unknown-operation", "declared-operations",
-            "event", "stdin");
+    /** 运行器的全部 14 个用例，按执行顺序（{@code spec/conformance/README.md}）。 */
+    private static final List<String> CASES = List.of("handshake", "refusal", "session", "lifecycle", "order", "unknown-operation",
+            "declared-operations", "unavailable", "event", "unsubscribed", "stream", "configuration", "stop-early", "stdin");
 
     private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
 

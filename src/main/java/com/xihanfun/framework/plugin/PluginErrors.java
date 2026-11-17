@@ -16,10 +16,10 @@ public final class PluginErrors {
     /** 回调被拒：会话令牌无效、所需权限未声明或未授予，或带了宿主没有交给插件的租户。 */
     public static final String CALLBACK_DENIED = "PLUGINS_DENIED_002";
 
-    /** 插件未就绪或正在停止；也用于宿主回调端点不可达。 */
+    /** 插件不在可服务状态；也用于回调连不上宿主或没有可用的回调端点。 */
     public static final String UNAVAILABLE = "PLUGINS_UNAVAILABLE_001";
 
-    /** 配置、启动、停止或回调时的未预期失败。 */
+    /** 生命周期或健康回调抛出、配置节不是 JSON 对象、对方写来的错误不合法、回调的 gRPC 状态没有对应的错误。 */
     public static final String UNEXPECTED = "PLUGINS_UNEXPECTED_001";
 
     private PluginErrors() {

@@ -4,7 +4,7 @@
   "echoes.relay.description": "经宿主调用另一个操作并返回它的应答。",
   "echoes.relay.title": "转发",
   "echojava.configuration.invalid": "XiHan:Echo 配置在 {reason} 处不合法。",
-  "echojava.host.unavailable": "宿主回调端点不可用。",
+  "echojava.host.unavailable": "上下文里没有宿主客户端：处理器不是由插件运行时调用的。",
   "echojava.relay.invalid_response": "宿主返回的 {operation} 响应不是 JSON。",
   "echojava.relay.operation_missing": "{operation} 的请求需要操作 ID。",
   "echojava.text.missing": "{operation} 的文本不能为空。",

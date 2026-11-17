@@ -15,28 +15,65 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
 /**
- * 插件运行时的公开类型与内置目录：消息目录的 10 种区域、日志行的格式、端点与订阅的文法、元数据的截止时间。
+ * 插件运行时的公开类型与规则：消息目录（回放 {@code plugin-messages.json}）、日志行的格式、握手行与回调端点的文法（回放 {@code handshake-lines.json}、
+ * {@code host-addresses.json}）、截止时间的读写（回放 {@code deadlines.json}）与订阅的文法。
  */
 class PluginTypesTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /** 规范的消息键对应的 SDK 常量。 */
+    private static final Map<String, String> CODES = Map.of(
+            PluginMessages.UNAVAILABLE, PluginErrors.UNAVAILABLE,
+            PluginMessages.FAILED, PluginErrors.UNEXPECTED,
+            PluginMessages.EVENT_UNSUBSCRIBED, "KERNEL_NOTFOUND_001",
+            PluginMessages.HOST_UNAVAILABLE, PluginErrors.UNAVAILABLE,
+            PluginMessages.CALLBACK_DENIED, PluginErrors.CALLBACK_DENIED,
+            PluginMessages.CALLBACK_TENANT_DENIED, PluginErrors.CALLBACK_DENIED,
+            PluginMessages.SESSION_INVALID, PluginErrors.CALLBACK_DENIED);
+
     @Test
-    void theBuiltInCatalogHasTenLocalesWithTheSameKeysAndPlaceholders() throws Exception {
+    void theBuiltInCatalogIsExactlyTheSpecifiedMessages() throws Exception {
+        // plugin-messages.json：键、参数（即 details 的成员）、错误码与 en-US 模板（invocation.md §8）；SDK 不自造键
+        JsonNode vectors = Vectors.read("plugin/plugin-messages.json");
+        Map<String, String> english = PluginMessages.templates();
+        Set<String> keys = new TreeSet<>();
+        for (JsonNode message : vectors.get("messages")) {
+            String key = message.get("key").asText();
+            keys.add(key);
+            assertEquals(message.get("template").asText(), english.get(key), key);
+            assertEquals(message.get("code").asText(), CODES.get(key), key);
+            assertEquals(new TreeSet<>(Vectors.strings(message.get("arguments"))), new TreeSet<>(MessageTemplate.placeholdersOf(english.get(key))), key);
+        }
+        assertEquals(keys, new TreeSet<>(english.keySet()), "the catalog holds exactly the specified keys");
+        Set<String> constants = new TreeSet<>();
+        for (Field field : PluginMessages.class.getFields()) {
+            if (Modifier.isStatic(field.getModifiers()) && field.getType() == String.class && !field.getName().equals("CATALOG_NAME")) {
+                constants.add((String) field.get(null));
+            }
+        }
+        assertEquals(keys, constants, "every constant is a specified key");
+        // 固定的 reason 文本与运行时写出的相同
+        Set<String> reasons = new TreeSet<>();
+        vectors.get("reasons").forEach(reason -> reasons.add(reason.get("reason").asText()));
+        assertTrue(reasons.containsAll(List.of("the configuration is not a JSON object", "the host reported a failure without an error",
+                Host.NO_ENDPOINT, "invalid error code '{code}'", "the host returned {results} results for {envelopes} envelopes")), reasons.toString());
+    }
+
+    @Test
+    void theBuiltInCatalogHasTenLocalesWithTheSameKeysAndPlaceholders() {
         PluginCatalog catalog = PluginMessages.catalog();
         assertEquals(new TreeSet<>(PluginCatalog.LOCALES), new TreeSet<>(catalog.locales().keySet()));
         Map<String, String> english = PluginMessages.templates();
-        for (Field field : PluginMessages.class.getFields()) {
-            if (Modifier.isStatic(field.getModifiers()) && field.getType() == String.class && !field.getName().equals("CATALOG_NAME")) {
-                assertTrue(english.containsKey((String) field.get(null)), "en-US has a template for " + field.getName());
-            }
-        }
         for (Map.Entry<String, Map<String, String>> locale : catalog.locales().entrySet()) {
             assertEquals(english.keySet(), locale.getValue().keySet(), "the keys of " + locale.getKey() + " match en-US");
             for (Map.Entry<String, String> template : locale.getValue().entrySet()) {
@@ -83,14 +120,78 @@ class PluginTypesTest {
     }
 
     @Test
-    void endpointsSubscriptionsAndDeadlinesFollowTheGrammars() {
-        assertEquals(Optional.of(new Endpoint(Network.UNIX, "/run/xihan/host 1.sock")), Endpoint.parse("unix /run/xihan/host 1.sock"));
-        assertEquals(Optional.of(new Endpoint(Network.NPIPE, "\\\\.\\pipe\\xihan")), Endpoint.parse("npipe \\\\.\\pipe\\xihan"));
-        assertEquals(Optional.empty(), Endpoint.parse("ipc /x"));
-        assertEquals(Optional.empty(), Endpoint.parse("tcp"));
-        assertEquals(Optional.empty(), Endpoint.parse("tcp "));
+    void handshakeLinesFollowTheGrammar() throws Exception {
+        // handshake-lines.json：地址是一个或多个空白之外的字符，tcp 只认回环地址加端口（handshake.md §2）
+        JsonNode vectors = Vectors.read("plugin/handshake-lines.json");
+        for (JsonNode valid : vectors.get("valid")) {
+            Optional<Endpoint> parsed = Endpoint.parseHandshakeLine(valid.get("line").asText());
+            assertEquals(Optional.of(new Endpoint(Network.parse(valid.get("network").asText()).orElseThrow(), valid.get("address").asText())), parsed,
+                    valid.toString());
+        }
+        for (String invalid : Vectors.strings(vectors.get("invalid"))) {
+            assertEquals(Optional.empty(), Endpoint.parseHandshakeLine(invalid), invalid);
+        }
+        // 空白集合（handshake.md §2）与 Character.isWhitespace 不同
+        assertTrue(Endpoint.isWhitespace(' ') && Endpoint.isWhitespace(' ') && Endpoint.isWhitespace(' ') && Endpoint.isWhitespace('\u0085'));
+        assertFalse(Endpoint.isWhitespace('\u001c') || Endpoint.isWhitespace('​') || Endpoint.isWhitespace('﻿'));
         assertEquals("tcp 127.0.0.1:5000", new Endpoint(Network.TCP, "127.0.0.1:5000").toString());
+    }
 
+    @Test
+    void hostAddressesAreParsedAndTheFirstSupportedEntryIsSelected() throws Exception {
+        // host-addresses.json：以 ; 分隔，任何一项不合法整个值就不合法；按顺序取第一个能连的（handshake.md §4）
+        JsonNode vectors = Vectors.read("plugin/host-addresses.json");
+        for (JsonNode valid : vectors.get("valid")) {
+            List<Endpoint> expected = new ArrayList<>();
+            valid.get("entries").forEach(entry -> expected.add(endpoint(entry)));
+            assertEquals(Optional.of(expected), Endpoint.parseList(valid.get("value").asText()), valid.toString());
+        }
+        for (String invalid : Vectors.strings(vectors.get("invalid"))) {
+            assertEquals(Optional.empty(), Endpoint.parseList(invalid), invalid);
+        }
+        assertEquals(Optional.empty(), Endpoint.parseList(null), "a missing variable is not a list");
+        for (JsonNode selection : vectors.get("selection")) {
+            Set<Network> supported = EnumSet.noneOf(Network.class);
+            selection.get("supported").forEach(name -> supported.add(Network.parse(name.asText()).orElseThrow()));
+            String value = selection.get("value").isNull() ? null : selection.get("value").asText();
+            Optional<Endpoint> expected = selection.get("selected").isNull() ? Optional.empty() : Optional.of(endpoint(selection.get("selected")));
+            assertEquals(expected, Endpoint.select(value, supported), selection.toString());
+        }
+        assertTrue(Transport.dialable().contains(Network.TCP), "loopback TCP can always be dialed");
+        assertFalse(Transport.dialable().contains(Network.NPIPE), "grpc-java cannot dial named pipes");
+    }
+
+    private static Endpoint endpoint(JsonNode node) {
+        return new Endpoint(Network.parse(node.get("network").asText()).orElseThrow(), node.get("address").asText());
+    }
+
+    @Test
+    void deadlinesAreReadStrictlyAndWrittenWithSevenDigits() throws Exception {
+        // deadlines.json：Instant 精确到纳秒，比较时不截断（invocation.md §2）
+        JsonNode vectors = Vectors.read("plugin/deadlines.json");
+        for (JsonNode valid : vectors.get("valid")) {
+            assertEquals(Optional.of(Instant.parse(valid.get("utc").asText())), Wire.parseDeadline(valid.get("text").asText()), valid.toString());
+        }
+        for (String invalid : Vectors.strings(vectors.get("invalid"))) {
+            assertEquals(Optional.empty(), Wire.parseDeadline(invalid), invalid);
+        }
+        assertEquals(Optional.empty(), Wire.parseDeadline(""));
+        for (JsonNode effective : vectors.get("effective")) {
+            Optional<Instant> grpc = effective.get("grpc").isNull() ? Optional.empty() : Optional.of(Instant.parse(effective.get("grpc").asText()));
+            Optional<Instant> expected = effective.get("expected").isNull() ? Optional.empty() : Optional.of(Instant.parse(effective.get("expected").asText()));
+            assertEquals(expected, Wire.effectiveDeadline(effective.get("metadata").asText(), grpc), effective.toString());
+        }
+        for (JsonNode written : vectors.get("written")) {
+            assertEquals(written.get("text").asText(), Wire.formatDeadline(Instant.parse(written.get("utc").asText())), written.toString());
+        }
+        assertEquals("2026-11-18T03:25:00.1234567+00:00", Wire.formatDeadline(Instant.parse("2026-11-18T03:25:00.123456789Z")),
+                "finer digits are truncated, not rounded");
+        assertEquals("9999-12-31T23:59:59.9999999+00:00", Wire.formatDeadline(Instant.MAX), "far deadlines stay readable");
+        assertTrue(Wire.parseDeadline(Wire.formatDeadline(Instant.MAX)).isPresent());
+    }
+
+    @Test
+    void subscriptionsFollowTheTopicGrammar() {
         assertTrue(Subscription.isTopic("orders.created-v2_1"));
         assertFalse(Subscription.isTopic("Orders"));
         assertFalse(Subscription.isTopic("orders\n"), "whole-string match");
@@ -99,10 +200,6 @@ class PluginTypesTest {
         assertEquals(Optional.of(SubscriptionMode.COMPETING), SubscriptionMode.parse(""));
         assertEquals(Optional.of(SubscriptionMode.BROADCAST), SubscriptionMode.parse("broadcast"));
         assertEquals(Optional.empty(), SubscriptionMode.parse("Broadcast"));
-
-        assertEquals(Optional.of(Instant.parse("2026-11-17T08:00:00.5Z")), Wire.parseDeadline("2026-11-17t16:00:00.5+08:00"));
-        assertEquals(Optional.empty(), Wire.parseDeadline("2026-11-17 08:00:00"));
-        assertEquals(Optional.empty(), Wire.parseDeadline(""));
     }
 
     @Test

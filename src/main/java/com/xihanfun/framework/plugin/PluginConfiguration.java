@@ -9,21 +9,28 @@ import com.xihanfun.framework.primitives.json.PrimitivesModule;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
- * {@code Configure} 下发的内容（{@code lifecycle.md} §2）。
+ * {@code Configure} 下发的内容（{@code lifecycle.md} §2、§7.2）。
  *
- * <p>配置节是宿主配置源展开后再序列化的 JSON 对象，宿主没有声明配置节时为 {@code {}}；配置源的值是字符串，
- * 所以 {@link #decode(Class)} 允许把字符串读成数字与布尔，成员名不区分大小写，未知成员忽略。
+ * <p>配置节是宿主配置源展开后再序列化的 JSON 对象，宿主没有声明配置节时为 {@code {}}；运行时在调配置回调之前核对它是 JSON 对象，
+ * 原样交给作者。宿主写出的叶子一律是 JSON 字符串，所以 {@link #decode(Class)} 允许把字符串读成数字（按 JSON 数字的文法）与布尔
+ * （只认 {@code true}、{@code false}，ASCII 不区分大小写），成员名不区分大小写，未知成员忽略。
  */
 public final class PluginConfiguration {
-    /** 解码配置节：标量可从字符串转换（Jackson 的缺省），成员名不区分大小写。 */
+    /**
+     * 解码配置节：字符串叶子按 {@link ConfigurationScalars} 读成数字与布尔；成员名不区分大小写（与宿主的 {@code IConfiguration} 一致），
+     * 比较时按 {@link Locale#ROOT} 换小写，不随进程区域变（土耳其语区域里 {@code I} 不换成 {@code i}）。
+     */
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .addModule(new PrimitivesModule())
+            .addModule(new ConfigurationScalars())
             .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES)
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .defaultLocale(Locale.ROOT)
             .build();
 
     private final String section;
@@ -35,7 +42,7 @@ public final class PluginConfiguration {
      * 创建配置。
      *
      * @param section 配置节的 JSON 对象文本；空串按 {@code {}}
-     * @param grantedPermissions 宿主授予的权限，等于清单 {@code permissions}
+     * @param grantedPermissions 宿主授予的权限，等于清单 {@code permissions}；回调前的权限核对以它为准
      * @param bindings 已解析的资源绑定
      * @param workDirectory 宿主分配的可写工作目录；没有时为空
      */

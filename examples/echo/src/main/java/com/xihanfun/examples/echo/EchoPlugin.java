@@ -55,7 +55,7 @@ public final class EchoPlugin {
     /** 转发请求没有给操作 ID。 */
     static final String OPERATION_MISSING = "ECHOJAVA_VALIDATION_003";
 
-    /** 宿主没有给出回调端点。 */
+    /** 上下文里没有宿主回调客户端：处理器不是由运行时调用的。 */
     static final String HOST_MISSING = "ECHOJAVA_UNAVAILABLE_001";
 
     /** 宿主转发回来的载荷不是 JSON。 */
@@ -189,7 +189,10 @@ public final class EchoPlugin {
                 context.correlation().orElse(null)));
     }
 
-    /** 经宿主回调调用另一个操作并原样返回应答；没有宿主回调端点时失败。 */
+    /**
+     * 经宿主回调调用另一个操作并原样返回应答。回调的失败（没有可用的回调端点、权限未授予、宿主不可达等）由运行时映射成错误，原样返回；
+     * 上下文不是运行时交给处理器的（没有宿主客户端）时失败。
+     */
     private Result<JsonNode> relay(Context context, RelayRequest request) {
         if (request.operation() == null || request.operation().isEmpty()) {
             return Result.fail(Error.validation(OPERATION_MISSING, "echojava.relay.operation_missing",

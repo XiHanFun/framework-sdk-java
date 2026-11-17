@@ -8,7 +8,6 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -29,7 +28,7 @@ public final class PluginOptions {
     private final List<PluginCatalog> catalogs;
     private final PluginHooks hooks;
     private final Network network;
-    private final Duration shutdownGrace;
+    private final boolean exitProcess;
     private final Map<String, String> environment;
     private final InputStream stdin;
     private final OutputStream stdout;
@@ -44,7 +43,7 @@ public final class PluginOptions {
         this.catalogs = List.copyOf(builder.catalogs);
         this.hooks = builder.hooks;
         this.network = builder.network;
-        this.shutdownGrace = builder.shutdownGrace;
+        this.exitProcess = builder.exitProcess;
         this.environment = builder.environment == null ? null : Map.copyOf(builder.environment);
         this.stdin = builder.stdin;
         this.stdout = builder.stdout;
@@ -93,8 +92,9 @@ public final class PluginOptions {
         return Optional.ofNullable(network);
     }
 
-    Duration shutdownGrace() {
-        return shutdownGrace;
+    /** 收尾到时是否结束进程：宿主启动的进程为真；测试在本进程里跑运行时，不能结束测试进程。 */
+    boolean exitProcess() {
+        return exitProcess;
     }
 
     String environment(String name) {
@@ -128,7 +128,7 @@ public final class PluginOptions {
         private final List<PluginCatalog> catalogs = new ArrayList<>();
         private PluginHooks hooks = PluginHooks.NONE;
         private Network network;
-        private Duration shutdownGrace = Duration.ofSeconds(3);
+        private boolean exitProcess = true;
         private Map<String, String> environment;
         private InputStream stdin;
         private OutputStream stdout;
@@ -223,18 +223,11 @@ public final class PluginOptions {
         }
 
         /**
-         * 设置 stdin 关闭或收到终止信号时等待在途调用的时间（{@code lifecycle.md} §5 第 2 条：宿主随后只再等 5 秒）；缺省 3 秒。
-         *
-         * @param value 时长
-         * @return 本构建器
-         * @throws IllegalArgumentException 为负
+         * 收尾（stdin 关闭、终止信号）到 3 秒时是否结束进程（{@code lifecycle.md} §7.7）：缺省是；测试在本进程里跑运行时时关掉，
+         * 到时只结束服务、不结束测试进程，也不登记关闭钩子。
          */
-        public Builder shutdownGrace(Duration value) {
-            Objects.requireNonNull(value, "value");
-            if (value.isNegative()) {
-                throw new IllegalArgumentException("The shutdown grace must not be negative.");
-            }
-            this.shutdownGrace = value;
+        Builder exitProcess(boolean value) {
+            this.exitProcess = value;
             return this;
         }
 

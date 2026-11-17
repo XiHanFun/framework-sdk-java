@@ -1,57 +1,54 @@
 package com.xihanfun.framework.plugin;
 
+import static com.xihanfun.framework.plugin.RunningPlugin.details;
+import static com.xihanfun.framework.plugin.RunningPlugin.object;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.protobuf.ByteString;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.operation.Expose;
 import com.xihanfun.framework.operation.OperationContract;
 import com.xihanfun.framework.operation.OperationRegistry;
 import com.xihanfun.framework.operation.OperationSchema;
-import com.xihanfun.framework.pipeline.Middleware;
-import com.xihanfun.framework.pipeline.PipelineBuilder;
+import com.xihanfun.framework.plugin.v1.PluginGrpc;
 import com.xihanfun.framework.plugin.v1.PluginProto;
-import com.xihanfun.framework.primitives.BaggageKeys;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.LifecycleState;
-import com.xihanfun.framework.primitives.PipelineStage;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Stability;
 import com.xihanfun.framework.primitives.Unit;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
-import io.grpc.stub.StreamObserver;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * 插件运行时：以宿主的身份连上本进程里启动的运行时，按 {@code handshake.md}、{@code lifecycle.md}、{@code invocation.md} 核对每个 RPC。
+ * 插件运行时的握手、次序、配置、启动、健康与启动前的核对：以宿主的身份连上本进程里启动的运行时，按 {@code handshake.md}、
+ * {@code lifecycle.md} §7 核对每个 RPC。
  */
 class PluginRuntimeTest {
-    private static final ObjectMapper JSON = new ObjectMapper();
-
     @TempDir
     Path directory;
 
@@ -63,16 +60,20 @@ class PluginRuntimeTest {
     record EchoResponse(String text) {
     }
 
-    /** 没有成员的请求。 */
-    record Empty() {
-    }
-
-    /** 上下文的快照。 */
-    record Seen(String traceId, String deadline, Map<String, String> baggage, boolean host) {
-    }
-
     /** 配置节。 */
     record Settings(String greeting, int count, boolean enabled) {
+    }
+
+    /** 各种数字与布尔的配置节。 */
+    record Typed(int count, long big, double ratio, boolean enabled, Boolean flag, BigDecimal amount) {
+    }
+
+    /** 只有一个整数的配置节。 */
+    record Count(int count) {
+    }
+
+    /** 只有一个布尔的配置节。 */
+    record Flag(boolean flag) {
     }
 
     private static OperationRegistry registry() {
@@ -80,66 +81,93 @@ class PluginRuntimeTest {
         registry.add(OperationContract.of("samples.echo").withStability(Stability.PREVIEW).withExpose(Expose.MCP, Expose.HTTP).withPermission("samples.read"),
                 EchoRequest.class, EchoResponse.class, (context, request) -> Result.ok(new EchoResponse(request.text())),
                 OperationSchema.of("{\"type\":\"object\"}", "{\"type\":\"object\",\"required\":[\"text\"]}"), "xihan.tests.sample");
-        registry.add(OperationContract.of("samples.fail"), Empty.class, Empty.class,
-                (context, request) -> Result.fail(Error.validation("SAMPLES_VALIDATION_001", "samples.text.missing", Map.of("field", "text", "limit", 2.0))));
-        registry.add(OperationContract.of("samples.context"), Empty.class, Seen.class, (context, request) -> Result.ok(new Seen(context.traceId(),
-                context.deadline().map(Instant::toString).orElse(""), context.baggage(), Host.of(context).isPresent())));
         return registry;
     }
 
+    /** 嵌套类型的异常：简单名不带外层类型。 */
+    static final class NestedFailure extends RuntimeException {
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+
+        NestedFailure(String message) {
+            super(message);
+        }
+    }
+
+    /** 健康回调可在测试里换掉，并记下调用次数。 */
+    static final class SwitchableHealth implements PluginHooks {
+        final AtomicReference<Supplier<Optional<PluginHealth>>> health = new AtomicReference<>(Optional::empty);
+        final AtomicInteger calls = new AtomicInteger();
+
+        @Override
+        public Optional<PluginHealth> health() {
+            calls.incrementAndGet();
+            return health.get().get();
+        }
+    }
+
     @Test
-    void writesOneHandshakeLineAndRejectsCallsWithoutTheSessionToken() throws Exception {
+    void writesOneHandshakeLineAndRejectsCallsWithoutExactlyOneSessionToken() throws Exception {
         try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().operations(registry()))) {
-            String expected = Transport.unixSupported() ? "unix" : "tcp";
-            assertTrue(plugin.line.startsWith("xihan-plugin/1 " + expected + " "), plugin.line);
-            if (expected.equals("tcp")) {
-                assertTrue(plugin.line.matches("xihan-plugin/1 tcp 127\\.0\\.0\\.1:[0-9]+"), "tcp binds only the loopback address: " + plugin.line);
+            Endpoint endpoint = Endpoint.parseHandshakeLine(plugin.line).orElseThrow();
+            assertEquals(Transport.unixSupported() ? Network.UNIX : Network.TCP, endpoint.network());
+            if (endpoint.network() == Network.TCP) {
+                assertTrue(endpoint.address().matches("127\\.0\\.0\\.1:[1-9][0-9]*"), "tcp binds only 127.0.0.1: " + plugin.line);
             }
-            for (String token : new String[] {null, "not-the-session-token", RunningPlugin.TOKEN + "x"}) {
-                StatusRuntimeException refused = assertThrows(StatusRuntimeException.class, () -> plugin.stub(token).health(PluginProto.HealthRequest.getDefaultInstance()));
-                assertEquals(Status.Code.UNAUTHENTICATED, refused.getStatus().getCode());
+            assertFalse(Endpoint.containsWhitespace(endpoint.address()));
+            List<PluginGrpc.PluginBlockingStub> refused = List.of(plugin.withoutToken(), plugin.stub("not-the-session-token"),
+                    plugin.stub(RunningPlugin.TOKEN + "x"), plugin.stub(RunningPlugin.TOKEN, "wrong"), plugin.stub("wrong", RunningPlugin.TOKEN),
+                    plugin.stub(RunningPlugin.TOKEN, RunningPlugin.TOKEN));
+            for (PluginGrpc.PluginBlockingStub stub : refused) {
+                StatusRuntimeException health = assertThrows(StatusRuntimeException.class, () -> stub.health(PluginProto.HealthRequest.getDefaultInstance()));
+                assertEquals(Status.Code.UNAUTHENTICATED, health.getStatus().getCode());
+                // 令牌先于次序核对：令牌不对的握手不执行，状态仍是 Declared
+                StatusRuntimeException handshake = assertThrows(StatusRuntimeException.class,
+                        () -> stub.handshake(PluginProto.HandshakeRequest.newBuilder().addProtocolVersions(1).build()));
+                assertEquals(Status.Code.UNAUTHENTICATED, handshake.getStatus().getCode());
+                // 令牌先于流式调用读第一帧：阻塞客户端的通道已经带着它的拦截器
+                assertEquals(Status.Code.UNAUTHENTICATED, RunningPlugin.stream(PluginGrpc.newStub(stub.getChannel()),
+                        PluginProto.StreamFrame.newBuilder().setStart(RunningPlugin.invokeRequest("samples.echo", "{}")).build()));
             }
-            // 令牌不对的握手不执行：状态仍是 Declared，带对令牌照常握手
-            assertThrows(StatusRuntimeException.class, () -> plugin.stub("wrong").handshake(PluginProto.HandshakeRequest.newBuilder().addProtocolVersions(1).build()));
             assertEquals(LifecycleState.DECLARED, plugin.runtime.lifecycle.state());
             assertEquals(1, plugin.handshake().getProtocolVersion());
         }
     }
 
     @Test
-    void handshakeDeclaresTheManifestOperationsSubscriptionsAndCatalogs() throws Exception {
+    void handshakeDeclaresTheManifestOperationsSubscriptionsAndOnlyTheAuthorsCatalogs() throws Exception {
         PluginCatalog catalog = PluginCatalog.of("samples", Map.of("en-US", Map.of("samples.text.missing", "The {field} is required."),
                 "zh-CN", Map.of("samples.text.missing", "{field} 不能为空。")));
         PluginOptions.Builder options = PluginOptions.builder().operations(registry())
-                .subscribe(Subscription.of("samples.events"), (context, envelope, attempt) -> Result.success())
                 .subscribe(Subscription.of("samples.events").withMessageType("samples.created").withMode(SubscriptionMode.BROADCAST),
                         (context, envelope, attempt) -> Result.success())
+                .subscribe(Subscription.of("samples.events"), (context, envelope, attempt) -> Result.success())
                 .catalog(catalog);
-        try (RunningPlugin plugin = RunningPlugin.start(directory, options)) {
+        // 清单文件以 UTF-8 BOM 开头：握手写去掉 BOM 的原文（handshake.md §3 第 3 条）
+        try (RunningPlugin plugin = RunningPlugin.start(directory, "\uFEFF" + RunningPlugin.MANIFEST, options, Map.of())) {
+            assertEquals(0xEF, Files.readAllBytes(directory.resolve("xihan.manifest.json"))[0] & 0xFF);
             PluginProto.HandshakeResponse response = plugin.handshake();
             assertEquals(1, response.getProtocolVersion());
-            assertEquals(1, response.getPrimitives());
-            assertEquals(RunningPlugin.MANIFEST, response.getManifest(), "the manifest is the file text, unchanged");
+            assertEquals(1, response.getPrimitives(), "primitives is the manifest's");
+            assertEquals(RunningPlugin.MANIFEST, response.getManifest(), "the manifest is the file text without the BOM");
             assertEquals("java", response.getSdk().getLanguage());
-            assertEquals(List.of("samples.context", "samples.echo", "samples.fail"),
-                    response.getOperationsList().stream().map(PluginProto.OperationDeclaration::getId).toList());
-            PluginProto.OperationDeclaration echo = response.getOperations(1);
+            assertEquals(List.of("samples.echo"), response.getOperationsList().stream().map(PluginProto.OperationDeclaration::getId).toList());
+            PluginProto.OperationDeclaration echo = response.getOperations(0);
             assertEquals("preview", echo.getStability());
             assertEquals(List.of("http", "mcp"), echo.getExposeList());
             assertEquals("samples.read", echo.getPermission());
             assertEquals("{\"type\":\"object\"}", echo.getRequestSchema());
-            assertFalse(echo.getStreaming());
+            assertFalse(echo.getStreaming(), "plugins declare only unary operations");
+            // 按声明的顺序，方式总是写出
             assertEquals(2, response.getSubscriptionsCount());
-            assertEquals("competing", response.getSubscriptions(0).getMode());
-            assertEquals("", response.getSubscriptions(0).getMessageType());
-            assertEquals("broadcast", response.getSubscriptions(1).getMode());
-            assertEquals("samples.created", response.getSubscriptions(1).getMessageType());
-            assertEquals("samples", response.getCatalogs(0).getName());
+            assertEquals("broadcast", response.getSubscriptions(0).getMode());
+            assertEquals("samples.created", response.getSubscriptions(0).getMessageType());
+            assertEquals("competing", response.getSubscriptions(1).getMode());
+            assertEquals("", response.getSubscriptions(1).getMessageType());
+            // 运行时自己的目录（plugins.protocol）不随握手发送
+            assertEquals(List.of("samples"), response.getCatalogsList().stream().map(PluginProto.MessageCatalog::getName).toList());
             assertEquals(List.of("en-US", "zh-CN"), response.getCatalogs(0).getLocalesList().stream().map(PluginProto.LocaleTemplates::getLocale).toList());
             assertEquals(LifecycleState.RESOLVED, plugin.runtime.lifecycle.state());
-
-            StatusRuntimeException again = assertThrows(StatusRuntimeException.class, plugin::handshake);
-            assertEquals(Status.Code.FAILED_PRECONDITION, again.getStatus().getCode());
         }
     }
 
@@ -165,9 +193,49 @@ class PluginRuntimeTest {
             StatusRuntimeException refused = assertThrows(StatusRuntimeException.class,
                     () -> plugin.stub().handshake(PluginProto.HandshakeRequest.newBuilder().addProtocolVersions(2).addProtocolVersions(3).build()));
             assertEquals(Status.Code.FAILED_PRECONDITION, refused.getStatus().getCode());
-            assertEquals(LifecycleState.DECLARED, plugin.runtime.lifecycle.state());
+            assertEquals(LifecycleState.DECLARED, plugin.runtime.lifecycle.state(), "a refused handshake leaves the state unchanged");
             assertEquals(1, plugin.handshake().getProtocolVersion());
         }
+    }
+
+    @Test
+    void callsOutOfOrderAreRefusedAndHealthBeforeStartReportsTheLocalState() throws Exception {
+        SwitchableHealth hooks = new SwitchableHealth();
+        hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.READY, HealthItem.of("sample", HealthStatus.HEALTHY))));
+        try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().hooks(hooks))) {
+            // 握手之前（lifecycle.md §7.1）
+            expectRefused(() -> plugin.configure("{}"), "Configure before Handshake");
+            expectRefused(() -> plugin.stub().start(PluginProto.StartRequest.getDefaultInstance()), "Start before Handshake");
+            expectRefused(() -> plugin.stub().stop(PluginProto.StopRequest.newBuilder().setGraceSeconds(5).build()), "Stop before Handshake");
+            expectHealth(plugin, LifecycleState.DECLARED);
+            plugin.handshake();
+            expectRefused(plugin::handshake, "a second Handshake");
+            expectRefused(() -> plugin.stub().start(PluginProto.StartRequest.getDefaultInstance()), "Start without Configure");
+            expectHealth(plugin, LifecycleState.RESOLVED);
+            assertTrue(plugin.configure("{}").getStatus().getOk());
+            expectHealth(plugin, LifecycleState.CONFIGURED);
+            expectRefused(() -> plugin.configure("{}"), "a second Configure");
+            assertEquals(0, hooks.calls.get(), "the health hook is not called before Start (lifecycle.md §7.4)");
+            assertTrue(plugin.stub().start(PluginProto.StartRequest.getDefaultInstance()).getStatus().getOk());
+            assertEquals(1, hooks.calls.get(), "Start asks the health hook once before it answers (lifecycle.md §7.3)");
+            expectRefused(() -> plugin.stub().start(PluginProto.StartRequest.getDefaultInstance()), "a second Start");
+            PluginProto.HealthResponse health = plugin.stub().health(PluginProto.HealthRequest.getDefaultInstance());
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_READY, health.getState());
+            assertEquals(1, health.getItemsCount());
+            assertEquals(LifecycleState.READY, plugin.runtime.lifecycle.state());
+        }
+    }
+
+    private static void expectRefused(Runnable call, String what) {
+        StatusRuntimeException refused = assertThrows(StatusRuntimeException.class, call::run, what);
+        assertEquals(Status.Code.FAILED_PRECONDITION, refused.getStatus().getCode(), what);
+    }
+
+    private static void expectHealth(RunningPlugin plugin, LifecycleState state) {
+        PluginProto.HealthResponse health = plugin.stub().health(PluginProto.HealthRequest.getDefaultInstance());
+        assertEquals(state.number(), health.getStateValue(), "Health before Start reports " + state);
+        assertEquals(0, health.getItemsCount(), "no health items before Start");
+        assertEquals(state, plugin.runtime.lifecycle.state());
     }
 
     @Test
@@ -196,36 +264,37 @@ class PluginRuntimeTest {
         RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().hooks(hooks));
         try {
             plugin.handshake();
-            StatusRuntimeException early = assertThrows(StatusRuntimeException.class, () -> plugin.stub().start(PluginProto.StartRequest.getDefaultInstance()));
-            assertEquals(Status.Code.FAILED_PRECONDITION, early.getStatus().getCode(), "Start requires Configure");
             PluginProto.ConfigureResponse response = plugin.stub().configure(PluginProto.ConfigureRequest.newBuilder()
-                    .setConfiguration("{\"Greeting\":\"hi\",\"count\":\"7\",\"enabled\":\"true\",\"extra\":1}")
+                    .setConfiguration("{\"Greeting\":\"hi\",\"count\":\"7\",\"enabled\":\"TRUE\",\"extra\":1}")
                     .addGrantedPermissions("capability:kernel.pipeline")
                     .addBindings(PluginProto.Binding.newBuilder().setName("main").setType("connection:relational").setValue("secret"))
                     .setWorkDirectory(directory.toString())
                     .build());
             assertTrue(response.getStatus().getOk());
-            // 配置源的值是字符串：数字与布尔从字符串读出，成员名不区分大小写，未知成员忽略（lifecycle.md §2）
+            // 宿主写出的叶子是字符串：数字与布尔从字符串读出，成员名不区分大小写，未知成员忽略（lifecycle.md §7.2）
             assertEquals(new Settings("hi", 7, true), configured.get().decode(Settings.class));
+            assertEquals("{\"Greeting\":\"hi\",\"count\":\"7\",\"enabled\":\"TRUE\",\"extra\":1}", configured.get().section(), "the section as it came");
             assertEquals(List.of("capability:kernel.pipeline"), configured.get().grantedPermissions());
             assertEquals(Optional.of(new ResolvedBinding("main", "connection:relational", "secret")), configured.get().findBinding("main"));
             assertEquals(Optional.of(directory), configured.get().workDirectory());
             assertFalse(configured.get().toString().contains("secret"), "connection strings stay out of logs");
 
             assertTrue(plugin.stub().start(PluginProto.StartRequest.getDefaultInstance()).getStatus().getOk());
+            assertEquals(LifecycleState.READY, plugin.runtime.lifecycle.state(), "Start answers after the plugin is ready");
             PluginProto.HealthResponse health = plugin.stub().health(PluginProto.HealthRequest.getDefaultInstance());
             assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_READY, health.getState());
             assertEquals(List.of("sample"), health.getItemsList().stream().map(PluginProto.HealthItem::getName).toList(),
                     "undeclared health items are dropped");
-            assertTrue(plugin.logs().contains("\"item\":\"undeclared\""), plugin.logs());
+            plugin.stub().health(PluginProto.HealthRequest.getDefaultInstance());
+            assertEquals(1, count(plugin.logs(), "\"item\":\"undeclared\""), "one warning per undeclared name: " + plugin.logs());
 
             Iterator<PluginProto.HealthResponse> watch = plugin.stub().withDeadlineAfter(10, TimeUnit.SECONDS).watchHealth(PluginProto.HealthRequest.getDefaultInstance());
             assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_READY, watch.next().getState(), "WatchHealth pushes the current state first");
 
             PluginProto.StopResponse stopped = plugin.stub().stop(PluginProto.StopRequest.newBuilder().setGraceSeconds(2).setReason("unload").build());
             assertTrue(stopped.getStatus().getOk());
-            assertEquals("unload", stopReason.get());
-            // 开始停止时推最后一条 Draining 并结束长流
+            assertEquals("unload", stopReason.get(), "the reason goes to the stop hook as it came");
+            // 进入 Draining 时推一次，应答 Stop 之后结束流
             List<PluginProto.LifecycleState> rest = new ArrayList<>();
             watch.forEachRemaining(next -> rest.add(next.getState()));
             assertEquals(List.of(PluginProto.LifecycleState.LIFECYCLE_STATE_DRAINING), rest);
@@ -236,260 +305,312 @@ class PluginRuntimeTest {
         }
     }
 
+    private static int count(String text, String needle) {
+        int found = 0;
+        for (int index = text.indexOf(needle); index >= 0; index = text.indexOf(needle, index + 1)) {
+            found++;
+        }
+        return found;
+    }
+
     @Test
-    void failedHooksMoveThePluginToFailedWithAnUnexpectedError() throws Exception {
+    void startEntersTheStateTheHealthHookReports() throws Exception {
+        // lifecycle.md §7.3：Ready、Degraded、Failed 照办；抛出时这一次的结果是 Degraded；其他状态与没有健康回调都是 Ready
+        record Scenario(String name, Supplier<Optional<PluginHealth>> health, LifecycleState expected) {
+        }
+        Error degraded = Error.unavailable("SAMPLES_UNAVAILABLE_001", "samples.dependency.down");
+        List<Scenario> scenarios = List.of(
+                new Scenario("none", Optional::empty, LifecycleState.READY),
+                new Scenario("ready", () -> Optional.of(PluginHealth.of(LifecycleState.READY)), LifecycleState.READY),
+                new Scenario("degraded", () -> Optional.of(PluginHealth.of(LifecycleState.DEGRADED).withError(degraded)), LifecycleState.DEGRADED),
+                new Scenario("failed", () -> Optional.of(PluginHealth.of(LifecycleState.FAILED)), LifecycleState.FAILED),
+                new Scenario("other", () -> Optional.of(PluginHealth.of(LifecycleState.STARTED)), LifecycleState.READY),
+                new Scenario("throws", () -> {
+                    throw new IllegalStateException("health is broken");
+                }, LifecycleState.DEGRADED));
+        for (Scenario scenario : scenarios) {
+            SwitchableHealth hooks = new SwitchableHealth();
+            hooks.health.set(scenario.health());
+            Path root = Files.createDirectories(directory.resolve(scenario.name()));
+            try (RunningPlugin plugin = RunningPlugin.start(root, PluginOptions.builder().hooks(hooks))) {
+                plugin.ready("{}");
+                assertEquals(scenario.expected(), plugin.runtime.lifecycle.state(), scenario.name());
+                if (scenario.name().equals("throws")) {
+                    PluginProto.HealthResponse health = plugin.stub().health(PluginProto.HealthRequest.getDefaultInstance());
+                    assertEquals("PLUGINS_UNEXPECTED_001", health.getError().getCode());
+                    assertEquals(object("id", "xihan.tests.sample", "phase", "health", "reason", "IllegalStateException"), details(health.getError()));
+                }
+                if (scenario.name().equals("degraded")) {
+                    assertEquals("SAMPLES_UNAVAILABLE_001", plugin.runtime.lifecycle.error().orElseThrow().code());
+                }
+            }
+        }
+    }
+
+    @Test
+    void healthAdoptsReportedStatesAndNeverLeavesFailed() throws Exception {
+        SwitchableHealth hooks = new SwitchableHealth();
+        try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().operations(registry()).hooks(hooks))) {
+            plugin.ready("{}");
+            assertEquals(LifecycleState.READY, plugin.runtime.lifecycle.state());
+            Iterator<PluginProto.HealthResponse> watch = plugin.stub().withDeadlineAfter(20, TimeUnit.SECONDS).watchHealth(PluginProto.HealthRequest.getDefaultInstance());
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_READY, watch.next().getState());
+
+            Error down = Error.unavailable("SAMPLES_UNAVAILABLE_001", "samples.dependency.down");
+            hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.DEGRADED, HealthItem.of("sample", HealthStatus.DEGRADED)).withError(down)));
+            PluginProto.HealthResponse degraded = health(plugin);
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_DEGRADED, degraded.getState());
+            assertEquals("SAMPLES_UNAVAILABLE_001", degraded.getError().getCode());
+            assertEquals("", degraded.getError().getText(), "an error with a message key leaves text empty");
+            assertEquals(LifecycleState.DEGRADED, plugin.runtime.lifecycle.state());
+            // 状态变化即时推送
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_DEGRADED, watch.next().getState());
+
+            hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.READY)));
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_READY, health(plugin).getState());
+
+            // 抛出：这一次的结果是 Degraded、没有健康项，状态不变
+            hooks.health.set(() -> {
+                throw new UnsupportedOperationException("not now");
+            });
+            PluginProto.HealthResponse threw = health(plugin);
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_DEGRADED, threw.getState());
+            assertEquals(0, threw.getItemsCount());
+            assertEquals(object("id", "xihan.tests.sample", "phase", "health", "reason", "UnsupportedOperationException"), details(threw.getError()));
+            assertEquals(LifecycleState.READY, plugin.runtime.lifecycle.state());
+
+            // 其他状态不改变状态
+            hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.DRAINING)));
+            health(plugin);
+            assertEquals(LifecycleState.READY, plugin.runtime.lifecycle.state());
+
+            hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.FAILED)));
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_FAILED, health(plugin).getState());
+            int asked = hooks.calls.get();
+            hooks.health.set(() -> Optional.of(PluginHealth.of(LifecycleState.READY)));
+            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_FAILED, health(plugin).getState(), "Failed does not come back");
+            assertEquals(asked, hooks.calls.get(), "the health hook is not called after Failed");
+            // Failed 不可服务
+            PluginProto.InvokeResponse refused = plugin.stub().invoke(RunningPlugin.invokeRequest("samples.echo", "{}"));
+            assertEquals("PLUGINS_UNAVAILABLE_001", refused.getStatus().getError().getCode());
+        }
+    }
+
+    private static PluginProto.HealthResponse health(RunningPlugin plugin) {
+        return plugin.stub().health(PluginProto.HealthRequest.getDefaultInstance());
+    }
+
+    @Test
+    void hooksThatThrowFailWithTheSimpleTypeNameOnly() throws Exception {
+        record Scenario(String name, RuntimeException thrown, String reason) {
+        }
+        // 匿名类没有简单名：取去掉包名的二进制名
+        RuntimeException anonymous = new RuntimeException("anonymous") {
+        };
+        String binary = anonymous.getClass().getName();
+        assertTrue(binary.startsWith(PluginRuntimeTest.class.getName() + "$"), binary);
+        List<Scenario> scenarios = List.of(
+                new Scenario("plain", new IllegalStateException("C:\\secret\\path"), "IllegalStateException"),
+                new Scenario("framework", new FrameworkException("SAMPLES_UNEXPECTED_001", "connection string"), "FrameworkException"),
+                new Scenario("nested", new NestedFailure("nested"), "NestedFailure"),
+                new Scenario("anonymous", anonymous, binary.substring(binary.lastIndexOf('.') + 1)));
+        for (Scenario scenario : scenarios) {
+            PluginHooks hooks = new PluginHooks() {
+                @Override
+                public Result<Unit> configure(Context context, PluginConfiguration configuration) {
+                    throw scenario.thrown();
+                }
+            };
+            Path root = Files.createDirectories(directory.resolve(scenario.name()));
+            try (RunningPlugin plugin = RunningPlugin.start(root, PluginOptions.builder().hooks(hooks))) {
+                plugin.handshake();
+                PluginProto.Status status = plugin.configure("{}").getStatus();
+                assertFalse(status.getOk());
+                assertEquals("PLUGINS_UNEXPECTED_001", status.getError().getCode());
+                assertEquals(PluginMessages.FAILED, status.getError().getMessageKey());
+                assertEquals("", status.getError().getText(), "the runtime does not render a key-bearing error");
+                assertEquals(object("id", "xihan.tests.sample", "phase", "configure", "reason", scenario.reason()), details(status.getError()));
+                assertFalse(status.getError().hasInner(), "the exception text does not reach the host");
+                PluginProto.HealthResponse health = health(plugin);
+                assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_FAILED, health.getState());
+                assertEquals("PLUGINS_UNEXPECTED_001", health.getError().getCode());
+                assertTrue(plugin.logs().contains("\"level\":\"error\"") && plugin.logs().contains(scenario.thrown().getMessage().replace("\\", "\\\\")),
+                        "the exception goes to stderr: " + plugin.logs());
+            }
+        }
+    }
+
+    @Test
+    void aConfigurationThatIsNotAnObjectFailsWithoutCallingTheHook() throws Exception {
+        for (String configuration : List.of("[]", "{\"a\":", "\"text\"", "{\"a\":1,\"a\":2}", " null")) {
+            AtomicInteger configures = new AtomicInteger();
+            AtomicInteger stops = new AtomicInteger();
+            PluginHooks hooks = new PluginHooks() {
+                @Override
+                public Result<Unit> configure(Context context, PluginConfiguration ignored) {
+                    configures.incrementAndGet();
+                    return Result.success();
+                }
+
+                @Override
+                public Result<Unit> stop(Context context, String reason, Duration grace) {
+                    stops.incrementAndGet();
+                    return Result.success();
+                }
+            };
+            Path root = Files.createDirectories(directory.resolve("c" + Integer.toHexString(configuration.hashCode())));
+            RunningPlugin plugin = RunningPlugin.start(root, PluginOptions.builder().hooks(hooks));
+            try {
+                plugin.handshake();
+                PluginProto.Status status = plugin.configure(configuration).getStatus();
+                assertEquals("PLUGINS_UNEXPECTED_001", status.getError().getCode(), configuration);
+                assertEquals(PluginMessages.FAILED, status.getError().getMessageKey());
+                assertEquals("", status.getError().getText());
+                assertEquals(object("id", "xihan.tests.sample", "phase", "configure", "reason", "the configuration is not a JSON object"),
+                        details(status.getError()));
+                assertEquals(0, configures.get(), "the configure hook is not called");
+                assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_FAILED, health(plugin).getState());
+                // 启动回调没有成功过：Stop 应答 ok、不调停止回调、退出（lifecycle.md §7.5）
+                assertTrue(plugin.stub().stop(PluginProto.StopRequest.newBuilder().setGraceSeconds(5).build()).getStatus().getOk());
+                assertTrue(plugin.runtime.awaitStopped(Duration.ofSeconds(10)));
+                assertEquals(0, stops.get());
+            } finally {
+                plugin.close();
+            }
+        }
+        // 空配置节等同 {}
+        AtomicReference<String> section = new AtomicReference<>();
         PluginHooks hooks = new PluginHooks() {
             @Override
             public Result<Unit> configure(Context context, PluginConfiguration configuration) {
-                throw new IllegalStateException("boom");
+                section.set(configuration.section());
+                return Result.success();
             }
         };
-        try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().hooks(hooks))) {
+        try (RunningPlugin plugin = RunningPlugin.start(Files.createDirectories(directory.resolve("empty")), PluginOptions.builder().hooks(hooks))) {
             plugin.handshake();
-            PluginProto.Status status = plugin.stub().configure(PluginProto.ConfigureRequest.getDefaultInstance()).getStatus();
-            assertFalse(status.getOk());
-            assertEquals("PLUGINS_UNEXPECTED_001", status.getError().getCode());
-            assertEquals(PluginMessages.FAILED, status.getError().getMessageKey());
-            assertEquals("Plugin 'xihan.tests.sample' failed during configure: java.lang.IllegalStateException", status.getError().getText());
-            assertEquals("{\"id\":\"xihan.tests.sample\",\"phase\":\"configure\",\"reason\":\"java.lang.IllegalStateException\"}", status.getError().getDetails());
-            PluginProto.HealthResponse health = plugin.stub().health(PluginProto.HealthRequest.getDefaultInstance());
-            assertEquals(PluginProto.LifecycleState.LIFECYCLE_STATE_FAILED, health.getState());
-            assertEquals("PLUGINS_UNEXPECTED_001", health.getError().getCode());
-            assertTrue(plugin.logs().contains("\"level\":\"error\""), plugin.logs());
+            assertTrue(plugin.configure("").getStatus().getOk());
+            assertEquals("{}", section.get());
         }
     }
 
     @Test
-    void invokesOperationsThroughTheInvokerAndThePluginPipeline() throws Exception {
-        AtomicInteger observed = new AtomicInteger();
-        PipelineBuilder pipeline = new PipelineBuilder().useAt(Middleware.of("Count", (context, next) -> {
-            observed.incrementAndGet();
-            return next.invoke(context);
-        }), PipelineStage.OBSERVE);
-        PluginCatalog catalog = PluginCatalog.of("samples", Map.of("en-US", Map.of("samples.text.missing", "The {field} is required (limit {limit:F1}).")));
-        try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().operations(registry()).pipeline(pipeline).catalog(catalog))) {
-            plugin.handshake();
-            PluginProto.InvokeResponse early = plugin.stub().invoke(invoke("samples.echo", "{\"text\":\"hi\"}"));
-            assertEquals("PLUGINS_UNAVAILABLE_001", early.getStatus().getError().getCode(), "calls before Start are unavailable");
-            assertEquals("Plugin 'xihan.tests.sample' is not available (state: Resolved).", early.getStatus().getError().getText());
-
-            plugin.configureAndStart("{}");
-            PluginProto.InvokeResponse echoed = plugin.stub().invoke(invoke("samples.echo", "{\"text\":\"hi\"}"));
-            assertTrue(echoed.getStatus().getOk());
-            assertEquals("{\"text\":\"hi\"}", echoed.getPayload().toStringUtf8());
-            assertEquals(1, observed.get(), "the call goes through the plugin's pipeline");
-
-            // 空载荷等价于 {}（invocation.md §1）：text 不是必填成员，读成 null
-            PluginProto.InvokeResponse empty = plugin.stub().invoke(PluginProto.InvokeRequest.newBuilder().setOperation("samples.echo").build());
-            assertTrue(empty.getStatus().getOk(), empty.toString());
-            assertEquals("{\"text\":null}", empty.getPayload().toStringUtf8());
-
-            PluginProto.InvokeResponse invalid = plugin.stub().invoke(invoke("samples.echo", "{\"text\":1}"));
-            assertEquals("KERNEL_VALIDATION_001", invalid.getStatus().getError().getCode());
-            assertEquals("{\"id\":\"samples.echo\",\"reason\":\"$.text\"}", invalid.getStatus().getError().getDetails());
-
-            PluginProto.InvokeResponse failed = plugin.stub().invoke(invoke("samples.fail", "{}"));
-            assertFalse(failed.getStatus().getOk());
-            assertTrue(failed.getPayload().isEmpty());
-            PluginProto.Error error = failed.getStatus().getError();
-            assertEquals("SAMPLES_VALIDATION_001", error.getCode());
-            assertEquals("samples.text.missing", error.getMessageKey());
-            assertEquals("The text is required (limit 2.0).", error.getText(), "the plugin's own catalog resolves the text");
-            assertEquals("{\"field\":\"text\",\"limit\":2.0}", error.getDetails(), "details follow the value model");
-
-            StatusRuntimeException unknown = assertThrows(StatusRuntimeException.class, () -> plugin.stub().invoke(invoke("samples.missing", "{}")));
-            assertEquals(Status.Code.UNIMPLEMENTED, unknown.getStatus().getCode());
+    void typedConfigurationReadsStringLeavesAsJsonNumbersAndBooleans() throws Exception {
+        Typed typed = configuration("{\"COUNT\":\"7\",\"Big\":\"9007199254740993\",\"ratio\":\"2.5e1\",\"enabled\":\"tRuE\",\"flag\":\"False\",\"amount\":\"1.50\"}")
+                .decode(Typed.class);
+        assertEquals(new Typed(7, 9007199254740993L, 25.0, true, false, new BigDecimal("1.50")), typed);
+        assertEquals(new Count(7), configuration("{\"count\":7}").decode(Count.class), "a JSON number reads as usual");
+        assertEquals(new Count(-3), configuration("{\"count\":\"-3\"}").decode(Count.class));
+        for (String invalid : List.of(" 7", "7 ", "+7", "07", "0x10", "NaN", "Infinity", "7.", ".5", "1e", "", "\uFF17")) {
+            assertThrows(IOException.class, () -> configuration("{\"count\":\"" + invalid + "\"}").decode(Count.class), "'" + invalid + "'");
         }
+        for (String invalid : List.of("yes", "1", "0", "t", "", " true", "fal\u017Fe", "tr\u0130e")) {
+            assertThrows(IOException.class, () -> configuration("{\"flag\":\"" + invalid + "\"}").decode(Flag.class), "'" + invalid + "'");
+        }
+        assertEquals(new Flag(true), configuration("{\"FLAG\":\"TRUE\"}").decode(Flag.class));
+        assertThrows(IOException.class, () -> configuration("{\"count\":1,\"count\":2}").decode(Count.class), "the common JSON check comes first");
+        assertTrue(ConfigurationScalars.asciiEqualsIgnoreCase("FaLsE", "false"));
+        assertFalse(ConfigurationScalars.asciiEqualsIgnoreCase("fal\u017Fe", "false"), "the long s is not an ASCII letter");
     }
 
-    @Test
-    void restoresTheInvocationContextFromTheMetadata() throws Exception {
-        try (RunningPlugin plugin = RunningPlugin.start(directory, RunningPlugin.MANIFEST, PluginOptions.builder().operations(registry()),
-                Map.of(PluginRuntime.ENV_HOST_ADDRESS, "tcp 127.0.0.1:1"))) {
-            plugin.ready("{}");
-            Instant deadline = Instant.now().plus(Duration.ofSeconds(30)).truncatedTo(ChronoUnit.MILLIS);
-            PluginProto.InvocationMetadata metadata = PluginProto.InvocationMetadata.newBuilder()
-                    .setTraceParent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
-                    .setDeadline(deadline.toString())
-                    .putBaggage(BaggageKeys.TENANT, "t1")
-                    .putBaggage(BaggageKeys.CORRELATION, "c1")
-                    .putBaggage("xihan.unregistered", "dropped")
-                    .putBaggage("other", "dropped")
-                    .build();
-            PluginProto.InvokeResponse response = plugin.stub().invoke(invoke("samples.context", "{}").toBuilder().setMetadata(metadata).build());
-            assertTrue(response.getStatus().getOk(), response.toString());
-            Seen seen = JSON.readValue(response.getPayload().toByteArray(), Seen.class);
-            assertEquals("0af7651916cd43dd8448eb211c80319c", seen.traceId());
-            assertEquals(deadline.toString(), seen.deadline());
-            assertEquals(Map.of(BaggageKeys.TENANT, "t1", BaggageKeys.CORRELATION, "c1"), seen.baggage(), "only registered keys come in");
-            assertTrue(seen.host(), "the host client is in the context");
-        }
-    }
-
-    @Test
-    void streamingCallsCheckTheFrameOrder() throws Exception {
-        try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().operations(registry()))) {
-            plugin.ready("{}");
-            assertEquals(Status.Code.INVALID_ARGUMENT, stream(plugin, PluginProto.StreamFrame.newBuilder().setChunk(ByteString.copyFromUtf8("{}")).build()));
-            assertEquals(Status.Code.UNIMPLEMENTED, stream(plugin, PluginProto.StreamFrame.newBuilder().setStart(invoke("samples.echo", "{}")).build()),
-                    "unary operations are not served by InvokeStream");
-        }
-    }
-
-    @Test
-    void deliversEventsByTopicModeAndType() throws Exception {
-        List<String> received = new CopyOnWriteArrayList<>();
-        PluginOptions.Builder options = PluginOptions.builder()
-                .subscribe(Subscription.of("samples.events"), (context, envelope, attempt) -> {
-                    received.add("competing:" + envelope.type() + ":" + attempt);
-                    return Result.success();
-                })
-                .subscribe(Subscription.of("samples.events").withMessageType("samples.created").withMode(SubscriptionMode.BROADCAST),
-                        (context, envelope, attempt) -> {
-                            received.add("broadcast:" + envelope.dataText() + ":" + context.tenant().orElse(""));
-                            return Result.success();
-                        })
-                .subscribe(Subscription.of("samples.broken"), (context, envelope, attempt) -> {
-                    throw new IllegalStateException("boom");
-                });
-        try (RunningPlugin plugin = RunningPlugin.start(directory, options)) {
-            plugin.ready("{}");
-            assertTrue(deliver(plugin, "samples.events", "samples.created", "competing").getOk());
-            assertTrue(deliver(plugin, "samples.events", "samples.created", "").getOk(), "an empty mode is competing");
-            assertTrue(deliver(plugin, "samples.events", "samples.created", "broadcast").getOk());
-            PluginProto.Status missing = deliver(plugin, "samples.events", "samples.deleted", "broadcast");
-            assertFalse(missing.getOk(), "a broadcast delivery is not handed to the competing handler");
-            assertEquals("KERNEL_NOTFOUND_001", missing.getError().getCode());
-            assertEquals(PluginMessages.EVENT_UNSUBSCRIBED, missing.getError().getMessageKey());
-            assertEquals("Plugin 'xihan.tests.sample' has no broadcast subscription to topic 'samples.events' for message type 'samples.deleted'.",
-                    missing.getError().getText());
-            assertEquals("KERNEL_UNEXPECTED_001", deliver(plugin, "samples.broken", "x", "competing").getError().getCode());
-            assertEquals(List.of("competing:samples.created:1", "competing:samples.created:1", "broadcast:{\"n\":1}:t1"), received);
-        }
-    }
-
-    @Test
-    void stopsWhenStdinCloses() throws Exception {
-        RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder());
-        try {
-            plugin.ready("{}");
-            plugin.closeStdin();
-            assertTrue(plugin.runtime.awaitStopped(Duration.ofSeconds(10)));
-            assertEquals(LifecycleState.STOPPED, plugin.runtime.lifecycle.state());
-            assertTrue(plugin.logs().contains("stdin closed"), plugin.logs());
-        } finally {
-            plugin.close();
-        }
-    }
-
-    @Test
-    void stopWaitsForInFlightCallsAndRejectsNewOnes() throws Exception {
-        CountDownLatch entered = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        OperationRegistry registry = new OperationRegistry();
-        registry.add(OperationContract.of("samples.wait"), Empty.class, Empty.class, (context, request) -> {
-            entered.countDown();
-            try {
-                release.await(10, TimeUnit.SECONDS);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-            }
-            return Result.ok(request);
-        });
-        RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().operations(registry));
-        try {
-            plugin.ready("{}");
-            AtomicReference<PluginProto.InvokeResponse> slow = new AtomicReference<>();
-            Thread caller = Thread.ofVirtual().start(() -> slow.set(plugin.stub().invoke(invoke("samples.wait", "{}"))));
-            assertTrue(entered.await(10, TimeUnit.SECONDS));
-            AtomicReference<PluginProto.StopResponse> stopped = new AtomicReference<>();
-            Thread stopper = Thread.ofVirtual().start(() -> stopped.set(plugin.stub().stop(PluginProto.StopRequest.newBuilder().setGraceSeconds(5).build())));
-            // Stop 先进入 Draining，再等在途的调用；此时到达的调用不执行
-            assertTrue(plugin.runtime.lifecycle.awaitState(LifecycleState.DRAINING, Duration.ofSeconds(10)));
-            assertEquals("PLUGINS_UNAVAILABLE_001", plugin.stub().invoke(invoke("samples.wait", "{}")).getStatus().getError().getCode());
-            assertEquals(null, stopped.get(), "Stop returns after the in-flight call");
-            release.countDown();
-            caller.join();
-            stopper.join();
-            assertTrue(slow.get().getStatus().getOk(), "the in-flight call completes");
-            assertTrue(stopped.get().getStatus().getOk());
-        } finally {
-            plugin.close();
-        }
+    private static PluginConfiguration configuration(String section) {
+        return new PluginConfiguration(section, List.of(), List.of(), Optional.empty());
     }
 
     @Test
     void refusesMisconfiguredPluginsBeforeListening() throws Exception {
-        assertEquals(PluginErrors.INVALID_SOURCE, failure(RunningPlugin.MANIFEST.replace("\"kind\": \"plugin\"", "\"kind\": \"provider\"")
+        assertRefused(PluginErrors.INVALID_SOURCE, RunningPlugin.MANIFEST.replace("\"kind\": \"plugin\"", "\"kind\": \"provider\"")
                 .replace("  \"isolation\": \"out-of-process\",\n", "").replace("  \"permissions\": [ \"capability:kernel.pipeline\", \"capability:messaging.queue\" ],\n", ""),
-                PluginOptions.builder(), Map.of()));
-        assertEquals(PluginErrors.INVALID_SOURCE, failure(RunningPlugin.MANIFEST.replace("\"health\": [ \"sample\" ]",
-                "\"health\": [ \"sample\" ], \"pipeline\": [ { \"middleware\": \"Audit\", \"stage\": \"observe\" } ]"), PluginOptions.builder(), Map.of()));
-        assertEquals(PluginErrors.INVALID_SOURCE, failure(RunningPlugin.MANIFEST.replace("  \"entry\": \"sample\"\n", "  \"activation\": [ \"onStartup\" ]\n"),
-                PluginOptions.builder(), Map.of()));
+                PluginOptions.builder(), Map.of());
+        assertRefused(PluginErrors.INVALID_SOURCE, RunningPlugin.MANIFEST.replace("\"health\": [ \"sample\" ]",
+                "\"health\": [ \"sample\" ], \"pipeline\": [ { \"middleware\": \"Audit\", \"stage\": \"observe\" } ]"), PluginOptions.builder(), Map.of());
+        assertRefused(PluginErrors.INVALID_SOURCE, RunningPlugin.MANIFEST.replace("  \"entry\": \"sample\"\n", "  \"activation\": [ \"onStartup\" ]\n"),
+                PluginOptions.builder(), Map.of());
+        assertRefused(PluginErrors.INVALID_SOURCE, RunningPlugin.MANIFEST.replace("\"primitives\": \"1\"", "\"primitives\": \"2\""), PluginOptions.builder(),
+                Map.of());
         OperationRegistry undeclared = new OperationRegistry();
-        undeclared.add(OperationContract.of("samples.undeclared"), Empty.class, Empty.class, (context, request) -> Result.ok(request));
-        assertEquals(PluginErrors.HANDSHAKE_MISMATCH, failure(RunningPlugin.MANIFEST, PluginOptions.builder().operations(undeclared), Map.of()));
+        undeclared.add(OperationContract.of("samples.undeclared"), EchoRequest.class, EchoResponse.class, (context, request) -> Result.ok(new EchoResponse("")));
+        assertRefused(PluginErrors.HANDSHAKE_MISMATCH, RunningPlugin.MANIFEST, PluginOptions.builder().operations(undeclared), Map.of());
         PluginOptions.Builder twice = PluginOptions.builder()
                 .subscribe(Subscription.of("samples.events"), (context, envelope, attempt) -> Result.success())
                 .subscribe(Subscription.of("samples.events").withMode(SubscriptionMode.BROADCAST), (context, envelope, attempt) -> Result.success());
-        assertEquals(PluginErrors.HANDSHAKE_MISMATCH, failure(RunningPlugin.MANIFEST, twice, Map.of()), "one (topic, type) pair cannot use two modes");
-        assertEquals("PRIMITIVES_VALIDATION_001", failure(RunningPlugin.MANIFEST, PluginOptions.builder(), Map.of(PluginRuntime.ENV_SESSION, "")));
-        assertEquals("PRIMITIVES_VALIDATION_001", failure(RunningPlugin.MANIFEST, PluginOptions.builder(), Map.of(PluginRuntime.ENV_PROTOCOL_VERSIONS, "1,x")));
-        assertEquals("PRIMITIVES_VALIDATION_001", failure(RunningPlugin.MANIFEST, PluginOptions.builder(), Map.of(PluginRuntime.ENV_HOST_ADDRESS, "pipe")));
+        assertRefused(PluginErrors.HANDSHAKE_MISMATCH, RunningPlugin.MANIFEST, twice, Map.of());
+        assertRefused("PRIMITIVES_VALIDATION_001", RunningPlugin.MANIFEST, PluginOptions.builder(), Map.of(PluginRuntime.ENV_SESSION, ""));
+        assertRefused("PRIMITIVES_VALIDATION_001", RunningPlugin.MANIFEST, PluginOptions.builder(), Map.of(PluginRuntime.ENV_PROTOCOL_VERSIONS, "1,x"));
         assertThrows(IllegalArgumentException.class, () -> Subscription.of("Bad Topic"));
         assertThrows(IllegalArgumentException.class, () -> PluginOptions.builder().network(Network.NPIPE));
     }
 
-    private String failure(String manifest, PluginOptions.Builder options, Map<String, String> environment) throws Exception {
+    /** 启动被拒：不写握手行，stderr 有一条 error，异常带给定的错误码（handshake.md §1 末段）。 */
+    private void assertRefused(String code, String manifest, PluginOptions.Builder options, Map<String, String> environment) throws Exception {
         Path file = directory.resolve("xihan.manifest.json");
         Files.writeString(file, manifest, StandardCharsets.UTF_8);
         Map<String, String> variables = new java.util.HashMap<>(Map.of(PluginRuntime.ENV_SESSION, RunningPlugin.TOKEN, PluginRuntime.ENV_PROTOCOL_VERSIONS, "1"));
         variables.putAll(environment);
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
         FrameworkException failed = assertThrows(FrameworkException.class, () -> PluginRuntime.start(options.manifest(file).environment(variables)
-                .streams(java.io.InputStream.nullInputStream(), java.io.OutputStream.nullOutputStream(), java.io.OutputStream.nullOutputStream())
-                .bridgePlatformLogging(false).build()));
-        return failed.code();
+                .streams(InputStream.nullInputStream(), stdout, stderr).bridgePlatformLogging(false).exitProcess(false).build()));
+        assertEquals(code, failed.code());
+        assertEquals(0, stdout.size(), "no handshake line");
+        String logs = stderr.toString(StandardCharsets.UTF_8);
+        assertEquals(1, logs.lines().count(), logs);
+        JsonNode line = RunningPlugin.JSON.readTree(logs);
+        assertEquals("error", line.get("level").asText());
+        assertEquals(code, line.get("code").asText());
     }
 
-    private static PluginProto.InvokeRequest invoke(String operation, String payload) {
-        return PluginProto.InvokeRequest.newBuilder().setOperation(operation).setPayload(ByteString.copyFromUtf8(payload)).build();
+    @Test
+    void anInvalidOrUnsupportedHostAddressOnlyWarns() throws Exception {
+        for (String value : new String[] {"pipe", "npipe \\\\.\\pipe\\xihan-host", "tcp 10.0.0.1:5000", "unix /tmp/a;"}) {
+            Path root = Files.createDirectories(directory.resolve("h" + Integer.toHexString(value.hashCode())));
+            try (RunningPlugin plugin = RunningPlugin.start(root, RunningPlugin.MANIFEST, PluginOptions.builder(), Map.of(PluginRuntime.ENV_HOST_ADDRESS, value))) {
+                assertTrue(plugin.logs().contains("\"level\":\"warning\"") && plugin.logs().contains(Host.NO_ENDPOINT), plugin.logs());
+                assertEquals(Optional.empty(), plugin.runtime.host.endpoint());
+                plugin.ready("{}");
+                assertEquals(LifecycleState.READY, plugin.runtime.lifecycle.state(), "the plugin serves as usual");
+            }
+        }
+        // 变量缺失同样只告警
+        try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder())) {
+            assertTrue(plugin.logs().contains(Host.NO_ENDPOINT), plugin.logs());
+        }
     }
 
-    private static PluginProto.Status deliver(RunningPlugin plugin, String topic, String type, String mode) {
-        return plugin.stub().handleEvent(PluginProto.HandleEventRequest.newBuilder()
-                .setEnvelope(PluginProto.Envelope.newBuilder().setTopic(topic).setId("e1").setSource("urn:test").setType(type).setSpecVersion("1.0")
-                        .setData(ByteString.copyFromUtf8("{\"n\":1}")))
-                .setMetadata(PluginProto.InvocationMetadata.newBuilder().putBaggage(BaggageKeys.TENANT, "t1"))
-                .setAttempt(1)
-                .setMode(mode)
-                .build()).getStatus();
-    }
-
-    /** 发一帧，返回流的结局。 */
-    private static Status.Code stream(RunningPlugin plugin, PluginProto.StreamFrame first) throws InterruptedException {
-        CountDownLatch done = new CountDownLatch(1);
-        AtomicReference<Status.Code> outcome = new AtomicReference<>();
-        StreamObserver<PluginProto.StreamFrame> requests = plugin.async().invokeStream(new StreamObserver<>() {
+    @Test
+    void theStopHookRunsAtMostOnceAndAStopWhileStoppingIsRefused() throws Exception {
+        CountDownLatch inStop = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger stops = new AtomicInteger();
+        PluginHooks hooks = new PluginHooks() {
             @Override
-            public void onNext(PluginProto.StreamFrame frame) {
+            public Result<Unit> stop(Context context, String reason, Duration grace) {
+                stops.incrementAndGet();
+                inStop.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                return Result.fail(Error.unavailable("SAMPLES_UNAVAILABLE_001", "samples.flush.failed"));
             }
-
-            @Override
-            public void onError(Throwable failure) {
-                outcome.set(Status.fromThrowable(failure).getCode());
-                done.countDown();
-            }
-
-            @Override
-            public void onCompleted() {
-                outcome.set(Status.Code.OK);
-                done.countDown();
-            }
-        });
-        requests.onNext(first);
-        assertTrue(done.await(10, TimeUnit.SECONDS));
-        requests.onCompleted();
-        return outcome.get();
+        };
+        RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().hooks(hooks));
+        try {
+            plugin.ready("{}");
+            AtomicReference<PluginProto.StopResponse> first = new AtomicReference<>();
+            Thread stopper = Thread.ofVirtual().start(() -> first.set(plugin.stub().stop(PluginProto.StopRequest.newBuilder().setGraceSeconds(5).build())));
+            assertTrue(inStop.await(10, TimeUnit.SECONDS));
+            expectRefused(() -> plugin.stub().stop(PluginProto.StopRequest.newBuilder().setGraceSeconds(5).build()), "Stop while stopping");
+            release.countDown();
+            stopper.join();
+            // 停止回调的失败写进 StopResponse.status，照常退出
+            assertEquals("SAMPLES_UNAVAILABLE_001", first.get().getStatus().getError().getCode());
+            assertTrue(plugin.runtime.awaitStopped(Duration.ofSeconds(10)));
+            assertEquals(1, stops.get());
+        } finally {
+            plugin.close();
+        }
+        assertEquals(1, stops.get(), "closing stdin afterwards does not call the stop hook again");
     }
 }

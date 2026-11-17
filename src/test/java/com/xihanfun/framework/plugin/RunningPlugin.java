@@ -2,11 +2,18 @@ package com.xihanfun.framework.plugin;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.protobuf.ByteString;
 import com.xihanfun.framework.plugin.v1.PluginGrpc;
 import com.xihanfun.framework.plugin.v1.PluginProto;
+import com.xihanfun.framework.primitives.BaggageKeys;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
+import io.grpc.Status;
 import io.grpc.stub.MetadataUtils;
+import io.grpc.stub.StreamObserver;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
@@ -17,18 +24,29 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 测试夹具：在本进程里启动一个插件运行时，换掉环境变量与标准输入输出，再以宿主的身份连上它的端点。
+ *
+ * <p>运行时以 {@code exitProcess(false)} 启动：收尾到时只停下服务端，不结束测试进程，也不登记关闭钩子。
  */
 final class RunningPlugin implements AutoCloseable {
     /** 会话令牌。 */
     static final String TOKEN = "dGVzdC1zZXNzaW9uLXRva2VuLTAxMjM0NTY3ODlhYmNkZWY";
+
+    /** 读写细节与载荷。 */
+    static final ObjectMapper JSON = new ObjectMapper();
+
+    /** 测试清单声明的回调权限：宿主授予的权限等于它（{@code lifecycle.md} §2）。 */
+    static final List<String> PERMISSIONS = List.of("capability:kernel.pipeline", "capability:messaging.queue");
 
     /** 测试用的清单：声明了测试会登记的操作、一个健康项、一个配置节与两项回调权限。 */
     static final String MANIFEST = """
@@ -49,9 +67,6 @@ final class RunningPlugin implements AutoCloseable {
             }
             """;
 
-    /** 握手行的文法（handshake.md §2）。 */
-    static final Pattern HANDSHAKE_LINE = Pattern.compile("^xihan-plugin/1 (unix|tcp|npipe) (\\S+)$");
-
     final PluginRuntime runtime;
     final String line;
     final ByteArrayOutputStream stderr;
@@ -64,10 +79,10 @@ final class RunningPlugin implements AutoCloseable {
         this.line = line;
         this.stderr = stderr;
         this.stdin = stdin;
-        Matcher matcher = HANDSHAKE_LINE.matcher(line);
-        assertTrue(matcher.matches(), "the handshake line must match the grammar: " + line);
-        Endpoint endpoint = new Endpoint(Network.parse(matcher.group(1)).orElseThrow(), matcher.group(2));
-        this.channel = Transport.dial(endpoint, executor).channel();
+        // 握手行按规范的文法解析（handshake.md §2），与宿主读到的一样
+        Optional<Endpoint> endpoint = Endpoint.parseHandshakeLine(line);
+        assertTrue(endpoint.isPresent(), "the handshake line must match the grammar: " + line);
+        this.channel = Transport.dial(endpoint.get(), executor).channel();
     }
 
     /**
@@ -88,7 +103,7 @@ final class RunningPlugin implements AutoCloseable {
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         ByteArrayOutputStream stderr = new ByteArrayOutputStream();
         PluginRuntime runtime = PluginRuntime.start(options.manifest(file).environment(variables).streams(input, stdout, stderr)
-                .bridgePlatformLogging(false).build());
+                .bridgePlatformLogging(false).exitProcess(false).build());
         String written = stdout.toString(StandardCharsets.UTF_8);
         assertTrue(written.endsWith("\n") && written.indexOf('\n') == written.length() - 1, "stdout must hold exactly one line: " + written);
         return new RunningPlugin(runtime, written.substring(0, written.length() - 1), stderr, stdin);
@@ -103,10 +118,14 @@ final class RunningPlugin implements AutoCloseable {
         return stub(TOKEN);
     }
 
-    /** 带给定令牌的阻塞客户端；为 {@code null} 时不带令牌。 */
-    PluginGrpc.PluginBlockingStub stub(String token) {
-        PluginGrpc.PluginBlockingStub stub = PluginGrpc.newBlockingStub(channel);
-        return token == null ? stub : stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers(token)));
+    /** 带给定令牌的阻塞客户端：每个元素是元数据 {@code xihan-plugin-session} 的一个值。 */
+    PluginGrpc.PluginBlockingStub stub(String... tokens) {
+        return PluginGrpc.newBlockingStub(channel).withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers(tokens)));
+    }
+
+    /** 不带会话令牌的阻塞客户端。 */
+    PluginGrpc.PluginBlockingStub withoutToken() {
+        return PluginGrpc.newBlockingStub(channel);
     }
 
     /** 带本次会话令牌的异步客户端（流式调用用）。 */
@@ -126,15 +145,21 @@ final class RunningPlugin implements AutoCloseable {
         configureAndStart(configuration);
     }
 
+    /** 以宿主的身份配置：授予的权限等于清单 {@code permissions}。 */
+    PluginProto.ConfigureResponse configure(String configuration) {
+        return stub().configure(PluginProto.ConfigureRequest.newBuilder().setConfiguration(configuration).addAllGrantedPermissions(PERMISSIONS)
+                .build());
+    }
+
     /** 握手之后配置并启动。 */
     void configureAndStart(String configuration) {
-        PluginProto.ConfigureResponse configured = stub().configure(PluginProto.ConfigureRequest.newBuilder().setConfiguration(configuration).build());
+        PluginProto.ConfigureResponse configured = configure(configuration);
         assertTrue(configured.getStatus().getOk(), "Configure must succeed: " + configured);
         PluginProto.StartResponse started = stub().start(PluginProto.StartRequest.getDefaultInstance());
         assertTrue(started.getStatus().getOk(), "Start must succeed: " + started);
     }
 
-    /** 关闭 stdin，等运行时停下。 */
+    /** 关闭 stdin：运行时随之收尾。 */
     void closeStdin() throws IOException {
         stdin.close();
     }
@@ -162,9 +187,83 @@ final class RunningPlugin implements AutoCloseable {
         assertTrue(stopped, "the runtime must stop after stdin is closed");
     }
 
-    private static Metadata headers(String token) {
+    /** 一次调用的请求。 */
+    static PluginProto.InvokeRequest invokeRequest(String operation, String payload) {
+        return PluginProto.InvokeRequest.newBuilder().setOperation(operation).setPayload(ByteString.copyFromUtf8(payload)).build();
+    }
+
+    /** 一次投递的请求：信封带 ID 与 {@code {"n":1}} 的数据，元数据带租户 {@code t1}。 */
+    static PluginProto.HandleEventRequest eventRequest(String topic, String type, String mode) {
+        return PluginProto.HandleEventRequest.newBuilder()
+                .setEnvelope(PluginProto.Envelope.newBuilder().setTopic(topic).setId("e1").setSource("urn:test").setType(type).setSpecVersion("1.0")
+                        .setData(ByteString.copyFromUtf8("{\"n\":1}")))
+                .setMetadata(PluginProto.InvocationMetadata.newBuilder().putBaggage(BaggageKeys.TENANT, "t1"))
+                .setAttempt(1)
+                .setMode(mode)
+                .build();
+    }
+
+    /** 投递一次，返回状态。 */
+    PluginProto.Status deliver(String topic, String type, String mode) {
+        return stub().handleEvent(eventRequest(topic, type, mode)).getStatus();
+    }
+
+    /** 把错误的 {@code details} 读成 JSON 值，按值比较。 */
+    static JsonNode details(PluginProto.Error error) {
+        try {
+            return JSON.readTree(error.getDetails());
+        } catch (IOException failed) {
+            throw new UncheckedIOException(failed);
+        }
+    }
+
+    /** 把期望的细节写成 JSON 值。 */
+    static JsonNode object(String... pairs) {
+        ObjectNode node = JSON.createObjectNode();
+        for (int index = 0; index < pairs.length; index += 2) {
+            node.put(pairs[index], pairs[index + 1]);
+        }
+        return node;
+    }
+
+    /** 开一个流式调用，发出 {@code first}（{@code null} 表示不发帧就关闭发送方向），返回流的结局。 */
+    static Status.Code stream(PluginGrpc.PluginStub stub, PluginProto.StreamFrame first) throws InterruptedException {
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<Status.Code> outcome = new AtomicReference<>();
+        StreamObserver<PluginProto.StreamFrame> requests = stub.invokeStream(new StreamObserver<>() {
+            @Override
+            public void onNext(PluginProto.StreamFrame frame) {
+            }
+
+            @Override
+            public void onError(Throwable failure) {
+                outcome.set(Status.fromThrowable(failure).getCode());
+                done.countDown();
+            }
+
+            @Override
+            public void onCompleted() {
+                outcome.set(Status.Code.OK);
+                done.countDown();
+            }
+        });
+        if (first == null) {
+            requests.onCompleted();
+        } else {
+            requests.onNext(first);
+        }
+        assertTrue(done.await(10, TimeUnit.SECONDS), "the stream must end");
+        if (first != null) {
+            requests.onCompleted();
+        }
+        return outcome.get();
+    }
+
+    private static Metadata headers(String... tokens) {
         Metadata headers = new Metadata();
-        headers.put(SessionGuard.KEY, token);
+        for (String token : tokens) {
+            headers.put(SessionGuard.KEY, token);
+        }
         return headers;
     }
 }
