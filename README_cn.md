@@ -232,7 +232,7 @@ Git Bash（关掉路径转换）：
 MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/root/.m2 -w /src maven:3-eclipse-temurin-21 mvn -B verify
 ```
 
-有 Maven 3.9+ 与 JDK 21+ 时直接 `mvn -B verify`。门禁：`maven.compiler.release` 21，编译带 `-Xlint:all -Werror` 与 `-Xdoclint:all,-missing`；测试是 JUnit 6（JUnit Platform），在类路径上运行，一致性向量按仓库根的相对路径读取（不复制向量文件）。`VectorCoverageTest` 核对规范的每个向量文件要么有测试回放、要么写明豁免：规范新增向量文件时它失败，要么补上回放，要么写进它的豁免并给出理由。容器以 root 写出的 `target/` 不提交。
+有 Maven 3.9+ 与 JDK 21+ 时直接 `mvn -B verify`。门禁：`maven.compiler.release` 21，编译带 `-Xlint:all -Werror` 与 `-Xdoclint:all,-missing`；测试是 JUnit 6（JUnit Platform），在类路径上运行，一致性向量按仓库根的相对路径读取（不复制向量文件）。`VectorCoverageTest` 按 `spec/conformance/profiles.json` 核对认领的一致性档的向量：规范在认领的档里新增向量时它失败，要么补上回放，要么列为缺口并写明理由。容器以 root 写出的 `target/` 不提交。
 
 示例插件 `examples/echo` 随测试编译，同样过上面的门禁。一致性测试 `EchoConformanceTest` 需要 PATH 上有 Go（版本见 `spec/conformance/go.mod`）：它在 `spec/conformance` 里 `go run ./cmd/xihan-conformance`，运行器与锁定的规范是同一个提交；没有 Go 时这个测试失败，确实要跳过时设 `XIHAN_CONFORMANCE_REQUIRED=0`（跳过时打印原因）。上面的 `maven` 镜像里没有 Go，要在容器里跑到它，用另装了 Go 的镜像，或在本机装好 JDK 21+ 与 Go 后直接 `mvn -B verify`；用这个镜像时要跳过它，给 `docker run` 加 `-e XIHAN_CONFORMANCE_REQUIRED=0`。
 
@@ -241,6 +241,13 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/roo
 ## 状态
 
 `0.1.0-SNAPSHOT`：原语、清单、调用上下文、管道、操作与进程外插件运行时（`plugin`，`xihan.plugin.v1`，grpc-java）可用，示例插件 `examples/echo` 通过规范仓库黑盒运行器的全部 14 个用例（Linux 上经 Unix 域套接字，Windows 上经回环 TCP 与 `.cmd` 启动脚本）；远程 Provider 的操作集（如 `caching.distributed@1`）尚未提供。正式发布时去掉 `-SNAPSHOT`，以 `v0.1.0` 标签发布到 Maven Central。
+
+按 RFC-0024：
+
+- 规范版本：钉在 framework-spec 的提交 `386501f`；规范还没有打标签，首个标签计划是 `v1.0.0-rc.1`。
+- 认领的档：`core` 与 `plugin`（`spec/conformance/profiles.json`）。
+- 缺口：无；认领的档的向量全部回放，`plugin` 运行器子命令通过。
+- 成熟度：在有钉在规范标签上的发布版之前是 Experimental。
 
 ## 生态
 

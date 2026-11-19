@@ -232,7 +232,7 @@ Git Bash (with path conversion turned off):
 MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/root/.m2 -w /src maven:3-eclipse-temurin-21 mvn -B verify
 ```
 
-With Maven 3.9+ and JDK 21+, run `mvn -B verify` directly. Gates: `maven.compiler.release` 21, compilation with `-Xlint:all -Werror` and `-Xdoclint:all,-missing`; tests use JUnit 6 (JUnit Platform) and run on the class path, and conformance vectors are read by relative path from the repository root (vector files are not copied). `VectorCoverageTest` checks that every vector file of the spec is either replayed by a test or exempted: when the spec adds a vector file, it fails until a test replays the file or the file is added to its exemptions with a reason. Do not commit the `target/` that the container writes as root.
+With Maven 3.9+ and JDK 21+, run `mvn -B verify` directly. Gates: `maven.compiler.release` 21, compilation with `-Xlint:all -Werror` and `-Xdoclint:all,-missing`; tests use JUnit 6 (JUnit Platform) and run on the class path, and conformance vectors are read by relative path from the repository root (vector files are not copied). `VectorCoverageTest` checks the vectors of the claimed conformance profiles against `spec/conformance/profiles.json`: when the spec adds a vector to a claimed profile, it fails until a test replays the file or the file is listed as a gap with a reason. Do not commit the `target/` that the container writes as root.
 
 The example plugin `examples/echo` is compiled with the tests and passes the same gates. The conformance test `EchoConformanceTest` needs Go on PATH (see `spec/conformance/go.mod` for the version): it runs `go run ./cmd/xihan-conformance` in `spec/conformance`, so the runner comes from the same commit as the locked spec; without Go, the test fails, and it is skipped (printing the reason) only when `XIHAN_CONFORMANCE_REQUIRED=0` is set. The `maven` image above has no Go; to run it in a container, use an image with Go installed as well, or install JDK 21+ and Go locally and run `mvn -B verify` directly; to skip it in that image, add `-e XIHAN_CONFORMANCE_REQUIRED=0` to `docker run`.
 
@@ -241,6 +241,13 @@ After `spec/plugin/plugin.proto` changes (a submodule upgrade), regenerate the p
 ## Status
 
 `0.1.0-SNAPSHOT`: primitives, manifests, the invocation context, the pipeline, operations and the out-of-process plugin runtime (`plugin`, `xihan.plugin.v1`, grpc-java) are usable, and the example plugin `examples/echo` passes all 14 cases of the spec repository's black-box runner (over a Unix domain socket on Linux, and over loopback TCP with a `.cmd` launcher on Windows); the operation sets for remote providers (such as `caching.distributed@1`) are not provided yet. For the official release, `-SNAPSHOT` will be dropped and the SDK published to Maven Central under the `v0.1.0` tag.
+
+Per RFC-0024:
+
+- Spec version: pinned to framework-spec commit `386501f`; the spec has no tag yet, and its first tag is planned as `v1.0.0-rc.1`.
+- Claimed profiles: `core` and `plugin` (`spec/conformance/profiles.json`).
+- Gaps: none; every vector of the claimed profiles is replayed, and the `plugin` runner subcommand passes.
+- Maturity: Experimental until there is a release pinned to a spec tag.
 
 ## Ecosystem
 
