@@ -14,7 +14,7 @@ description: 为 framework-sdk-java 准备版本、修改 pom.xml 的版本、�
 ## 与规范标签的关系（RFC-0024「实现钉规范」）
 
 - 日常分支可以指向规范已推送的任意提交；发预发布或正式版时，`spec` 子模块必须正好在某个规范标签上。
-- 预发布可以钉规范的 `vX.Y.Z-rc.N`，正式版只能钉规范的正式版标签（不带预发布后缀）。规范的首个标签计划是 `v1.0.0-rc.1`，先用 `git -C spec tag --points-at HEAD` 看子模块是否正好在标签上。规范还没有对应标签时，先请用户决定是否在 framework-spec 打标签（规范的标签打在它的 `main` 上，同一提交另打 `conformance/vX.Y.Z`），再把 `spec` 指过去、跑全部门禁。
+- 预发布可以钉规范的 `vX.Y.Z-rc.N`，正式版只能钉规范的正式版标签（不带预发布后缀）。先用 `git -C spec tag --points-at HEAD` 看子模块是否正好在标签上。规范还没有对应标签时，先请用户决定是否在 framework-spec 打标签（规范的标签打在它的 `main` 上，同一提交另打 `conformance/vX.Y.Z`），再把 `spec` 指过去、跑全部门禁。
 - 成熟度：在有钉在规范标签上的发布版之前是 Experimental；文档页「一致性」一节写明认领的档与缺口。
 
 ## 准备版本
