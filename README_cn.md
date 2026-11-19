@@ -232,9 +232,9 @@ Git Bash（关掉路径转换）：
 MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -v xihan-sdk-java-m2:/root/.m2 -w /src maven:3-eclipse-temurin-21 mvn -B verify
 ```
 
-有 Maven 3.9+ 与 JDK 21+ 时直接 `mvn -B verify`。门禁：`maven.compiler.release` 21，编译带 `-Xlint:all -Werror` 与 `-Xdoclint:all,-missing`；测试是 JUnit 6（JUnit Platform），在类路径上运行，一致性向量按仓库根的相对路径读取（不复制向量文件）。容器以 root 写出的 `target/` 不提交。
+有 Maven 3.9+ 与 JDK 21+ 时直接 `mvn -B verify`。门禁：`maven.compiler.release` 21，编译带 `-Xlint:all -Werror` 与 `-Xdoclint:all,-missing`；测试是 JUnit 6（JUnit Platform），在类路径上运行，一致性向量按仓库根的相对路径读取（不复制向量文件）。`VectorCoverageTest` 核对规范的每个向量文件要么有测试回放、要么写明豁免：规范新增向量文件时它失败，要么补上回放，要么写进它的豁免并给出理由。容器以 root 写出的 `target/` 不提交。
 
-示例插件 `examples/echo` 随测试编译，同样过上面的门禁。一致性测试 `EchoConformanceTest` 需要 PATH 上有 Go（版本见 `spec/conformance/go.mod`）：它在 `spec/conformance` 里 `go run ./cmd/xihan-conformance`，运行器与锁定的规范是同一个提交；没有 Go 时这个测试跳过并打印原因。上面的 `maven` 镜像里没有 Go，要在容器里跑到它，用另装了 Go 的镜像，或在本机装好 JDK 21+ 与 Go 后直接 `mvn -B verify`。
+示例插件 `examples/echo` 随测试编译，同样过上面的门禁。一致性测试 `EchoConformanceTest` 需要 PATH 上有 Go（版本见 `spec/conformance/go.mod`）：它在 `spec/conformance` 里 `go run ./cmd/xihan-conformance`，运行器与锁定的规范是同一个提交；没有 Go 时这个测试失败，确实要跳过时设 `XIHAN_CONFORMANCE_REQUIRED=0`（跳过时打印原因）。上面的 `maven` 镜像里没有 Go，要在容器里跑到它，用另装了 Go 的镜像，或在本机装好 JDK 21+ 与 Go 后直接 `mvn -B verify`；用这个镜像时要跳过它，给 `docker run` 加 `-e XIHAN_CONFORMANCE_REQUIRED=0`。
 
 改了 `spec/plugin/plugin.proto`（submodule 升级）后重新生成协议代码：`mvn -B -Pprotocol process-sources`，在 Docker 里就是把上面命令末尾的 `verify` 换成 `-Pprotocol process-sources`。protoc 与 protoc-gen-grpc-java 从 Maven Central 取，版本即 `pom.xml` 的 `protobuf.version` 与 `grpc.version`；生成物整个替换 `src/main/java/com/xihanfun/framework/plugin/v1`，与源文件一起提交。
 

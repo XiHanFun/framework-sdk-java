@@ -4,9 +4,9 @@ name: CI
 # ubuntu 与 windows；ubuntu 上另外核对提交的插件协议代码与 spec/plugin/plugin.proto 重新生成的一致。
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -37,7 +37,7 @@ jobs:
           java-version: '21'
           cache: maven
 
-      # 黑盒运行器是规范仓库里的 Go 程序，一致性测试以 go run 从 submodule 运行它；没有 Go 时那个测试跳过，所以 CI 必须装上
+      # 黑盒运行器是规范仓库里的 Go 程序，一致性测试以 go run 从 submodule 运行它；没有 Go 时那个测试失败，所以 CI 必须装上
       - name: 安装 Go（一致性测试的黑盒运行器）
         uses: actions/setup-go@v6
         with:

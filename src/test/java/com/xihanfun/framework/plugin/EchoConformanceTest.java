@@ -29,9 +29,9 @@ import org.junit.jupiter.api.io.TempDir;
  * 一致性：把示例插件 echo 放进临时目录，用规范仓库的黑盒运行器（{@code spec/conformance/cmd/xihan-conformance}，版本即锁定的 submodule）
  * 跑全部用例，断言全部通过、没有跳过（RFC-0017「一致性」，{@code invocation.md} §7）。
  *
- * <p>运行器是 Go 程序：没有 Go 时本测试跳过。清单的 {@code entry} 按当前平台指向生成的启动脚本（Unix 上是带 shebang 的 sh 脚本，
- * Windows 上是 {@code .cmd}）；宿主只继承 {@code handshake.md} §1 列出的环境变量，所以脚本里写 {@code java} 的绝对路径，
- * 类路径写进 Java 的参数文件。
+ * <p>运行器是 Go 程序：没有 Go 时本测试失败，只有设了环境变量 {@code XIHAN_CONFORMANCE_REQUIRED=0} 才跳过。
+ * 清单的 {@code entry} 按当前平台指向生成的启动脚本（Unix 上是带 shebang 的 sh 脚本，Windows 上是 {@code .cmd}）；
+ * 宿主只继承 {@code handshake.md} §1 列出的环境变量，所以脚本里写 {@code java} 的绝对路径，类路径写进 Java 的参数文件。
  */
 class EchoConformanceTest {
     /** 运行器的全部 14 个用例，按执行顺序（{@code spec/conformance/README.md}）。 */
@@ -43,10 +43,15 @@ class EchoConformanceTest {
     @Test
     void echoPassesEveryCaseOfTheBlackBoxRunner(@TempDir Path directory) throws Exception {
         Optional<Path> go = findGo();
-        if (go.isEmpty()) {
-            System.out.println("[EchoConformanceTest] skipped: Go is not on PATH; the black-box runner of framework-spec is a Go program");
+        // 缺 Go 默认失败，门禁不因环境里没有运行器而静默变绿；只有显式设为 0 才跳过
+        boolean required = !"0".equals(System.getenv("XIHAN_CONFORMANCE_REQUIRED"));
+        if (go.isEmpty() && !required) {
+            System.out.println("[EchoConformanceTest] skipped: Go is not on PATH and XIHAN_CONFORMANCE_REQUIRED=0");
         }
-        Assumptions.assumeTrue(go.isPresent(), "Go is not on PATH; the black-box runner of framework-spec is a Go program.");
+        Assumptions.assumeTrue(go.isPresent() || required,
+                "Go is not on PATH and XIHAN_CONFORMANCE_REQUIRED=0; the black-box runner of framework-spec is a Go program.");
+        assertTrue(go.isPresent(), "Go is not on PATH; the black-box runner of framework-spec is a Go program. "
+                + "Install Go, or set XIHAN_CONFORMANCE_REQUIRED=0 to skip this test.");
         Path root = Vectors.root();
         Path conformance = root.resolve("spec").resolve("conformance");
 
