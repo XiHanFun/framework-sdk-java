@@ -234,14 +234,20 @@ public final class Host {
             return Optional.of(Error.denied(PluginErrors.CALLBACK_DENIED, PluginMessages.CALLBACK_TENANT_DENIED,
                     Map.of("id", wire.pluginId(), "tenant", tenant.get())));
         }
-        // 截止时间先于取消：截止令牌触发时上下文同样算已取消，而这一行按 DeadlineExceeded
-        if (context.isExpired(Instant.now())) {
+        // 截止时间先于取消：截止令牌触发时上下文同样算已取消，而这一行按 DeadlineExceeded。截止时间已过先看截止令牌：它由定时器按
+        // nanoTime 触发，墙上时钟（Instant.now()）可能还差一点才到截止时间，只看时钟会把截止时间报成取消；令牌还没触发而时钟已过的同样算
+        if (deadlineFired(context) || context.isExpired(Instant.now())) {
             return Optional.of(mapStatus(wire, rpc, Status.Code.DEADLINE_EXCEEDED.value(), "", true, operation));
         }
         if (context.isCancelled()) {
             return Optional.of(mapStatus(wire, rpc, Status.Code.CANCELLED.value(), "", true, operation));
         }
         return Optional.empty();
+    }
+
+    /** 上下文的截止令牌已触发：{@link Context#cancellation()} 在截止令牌触发时总是报超时，不论外部令牌，也不读时钟。 */
+    private static boolean deadlineFired(Context context) {
+        return context.cancellation().map(Error::code).filter(InvocationErrors.DEADLINE_EXCEEDED::equals).isPresent();
     }
 
     /** 一次阻塞的 gRPC 调用。 */

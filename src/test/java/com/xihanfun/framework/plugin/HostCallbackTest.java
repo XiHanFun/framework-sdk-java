@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.google.protobuf.ByteString;
 import com.xihanfun.framework.invocation.CancellableContext;
 import com.xihanfun.framework.invocation.Context;
+import com.xihanfun.framework.invocation.DeadlineSignals;
 import com.xihanfun.framework.operation.OperationContract;
 import com.xihanfun.framework.operation.OperationRegistry;
 import com.xihanfun.framework.operation.OperationResponse;
@@ -75,7 +76,8 @@ class HostCallbackTest {
 
     /**
      * 请求：在给定状态的上下文里经宿主调用 {@code operation}：{@code expired} 是截止时间已过，{@code cancelled} 是已被取消，
-     * {@code timeout} 是 300 毫秒后到截止时间，{@code cancel-later} 是 300 毫秒后取消。
+     * {@code timeout} 是 300 毫秒后到截止时间，{@code cancel-later} 是 300 毫秒后取消，{@code signalled} 是截止令牌已触发而
+     * 墙上时钟离截止时间还有 5 分钟。
      */
     record Guarded(String operation, String state) {
     }
@@ -205,11 +207,14 @@ class HostCallbackTest {
             CancellableContext scope = switch (request.state()) {
                 case "expired" -> context.withTimeout(Duration.ZERO);
                 case "timeout" -> context.withTimeout(Duration.ofMillis(300));
+                case "signalled" -> context.withTimeout(Duration.ofMinutes(5));
                 default -> context.withCancellation();
             };
             try (scope) {
                 if (request.state().equals("cancelled")) {
                     scope.cancel();
+                } else if (request.state().equals("signalled")) {
+                    DeadlineSignals.fire(scope.context());
                 } else if (request.state().equals("cancel-later")) {
                     Thread.ofVirtual().start(() -> {
                         try {
@@ -406,6 +411,9 @@ class HostCallbackTest {
                     call(plugin, "samples.wait", new Guarded("orders.create", "expired"), null, Outcome.class));
             assertEquals(new Outcome(false, "KERNEL_CANCELLED_001", "kernel.invocation.cancelled", "", ""),
                     call(plugin, "samples.wait", new Guarded("orders.create", "cancelled"), null, Outcome.class));
+            // 截止令牌按 nanoTime 由定时器触发，墙上时钟可能还没到截止时间：归因看令牌，仍是 DeadlineExceeded
+            assertEquals(new Outcome(false, "KERNEL_TIMEOUT_001", "kernel.invocation.deadline_exceeded", "", ""),
+                    call(plugin, "samples.wait", new Guarded("orders.create", "signalled"), null, Outcome.class));
             assertEquals(List.of(), sessions, "no request reaches the host");
             // 在途的回调：截止时间到了由 grpc-java 以 DeadlineExceeded 结束，调用方取消以 Cancelled 结束
             assertEquals(new Outcome(false, "KERNEL_TIMEOUT_001", "kernel.invocation.deadline_exceeded", "", ""),
