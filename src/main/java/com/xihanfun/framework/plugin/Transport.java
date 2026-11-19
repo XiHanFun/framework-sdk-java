@@ -1,5 +1,6 @@
 package com.xihanfun.framework.plugin;
 
+import com.xihanfun.framework.internal.Whitespace;
 import io.grpc.BindableService;
 import io.grpc.InsecureChannelCredentials;
 import io.grpc.InsecureServerCredentials;
@@ -78,13 +79,13 @@ final class Transport {
     }
 
     /**
-     * 判断临时目录下的套接字路径能不能写进握手行：握手行的地址不能有空白（{@code handshake.md} §2 的字符集，{@link Endpoint#isWhitespace(char)}），
+     * 判断临时目录下的套接字路径能不能写进握手行：握手行的地址不能有空白（{@code handshake.md} §2 的字符集，{@link Whitespace#isWhitespace(char)}），
      * 套接字路径不能超过 sun_path 的 107 个字节；不能时自动选择退回回环 TCP。
      */
     private static boolean unixPathUsable() {
         String sample = Path.of(System.getProperty("java.io.tmpdir"), "xihan-plugin-0123456789012345678", "plugin.sock")
                 .toAbsolutePath().toString();
-        return !Endpoint.containsWhitespace(sample) && sample.getBytes(StandardCharsets.UTF_8).length <= 107;
+        return !Whitespace.containsWhitespace(sample) && sample.getBytes(StandardCharsets.UTF_8).length <= 107;
     }
 
     private static Listening listenTcp(BindableService service, io.grpc.ServerInterceptor guard, Executor executor) throws IOException {

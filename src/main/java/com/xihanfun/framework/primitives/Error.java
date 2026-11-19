@@ -1,5 +1,6 @@
 package com.xihanfun.framework.primitives;
 
+import com.xihanfun.framework.internal.Whitespace;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -81,9 +82,9 @@ public final class Error {
      * 用已解析的文案创建错误：线上还原与异常转换用，没有消息键。
      *
      * @param code 错误码
-     * @param text 已解析的文案，不能为空串
+     * @param text 已解析的文案，不能为空，也不能只有空白（RFC-0001「空白字符」）
      * @return 错误
-     * @throws IllegalArgumentException 错误码不合法或文案为空
+     * @throws IllegalArgumentException 错误码不合法，或文案为空、只有空白
      */
     public static Error literal(String code, String text) {
         return literal(code, text, Map.of());
@@ -93,7 +94,7 @@ public final class Error {
      * 用已解析的文案与细节创建错误。
      *
      * @param code 错误码
-     * @param text 已解析的文案，不能为空串
+     * @param text 已解析的文案，不能为空，也不能只有空白（RFC-0001「空白字符」）
      * @param details 细节；只允许 JSON 可表示的值
      * @return 错误
      * @throws IllegalArgumentException 错误码、文案或细节不合法
@@ -106,7 +107,7 @@ public final class Error {
      * 用已解析的文案、细节与内部错误创建错误。
      *
      * @param code 错误码
-     * @param text 已解析的文案，不能为空串
+     * @param text 已解析的文案，不能为空，也不能只有空白（RFC-0001「空白字符」）
      * @param details 细节；只允许 JSON 可表示的值
      * @param inner 内部错误
      * @return 错误
@@ -339,11 +340,11 @@ public final class Error {
      *
      * @param code 错误码
      * @param messageKey 消息键；空表示没有（Literal）
-     * @param message 发送端已解析的文案，不能为空串
+     * @param message 发送端已解析的文案，不能为空，也不能只有空白（RFC-0001「空白字符」）
      * @param details 细节
      * @param inner 内部错误；空表示没有
      * @return 错误
-     * @throws IllegalArgumentException 错误码、消息键或细节不合法，或文案为空
+     * @throws IllegalArgumentException 错误码、消息键或细节不合法，或文案为空、只有空白
      */
     public static Error restore(String code, Optional<String> messageKey, String message, Map<String, ?> details, Optional<Error> inner) {
         ErrorCode.validate(code);
@@ -445,9 +446,9 @@ public final class Error {
     /**
      * 填入已解析的文案。
      *
-     * @param newText 文案，不能为空串
+     * @param newText 文案，不能为空，也不能只有空白（RFC-0001「空白字符」）
      * @return 新的错误
-     * @throws IllegalArgumentException 文案为空
+     * @throws IllegalArgumentException 文案为空或只有空白
      */
     public Error withText(String newText) {
         return new Error(code, messageKey, requireText(newText), details, inner);
@@ -499,8 +500,9 @@ public final class Error {
 
     private static String requireText(String text) {
         Objects.requireNonNull(text, "text");
-        if (text.isEmpty()) {
-            throw new IllegalArgumentException("A literal error needs a text.");
+        // 文案至少要有一个空白之外的字符（RFC-0001「空白字符」，ADR-0245）：只有空白与空串一样不是文案
+        if (Whitespace.isBlank(text)) {
+            throw new IllegalArgumentException("A literal error needs a text that is not empty or whitespace.");
         }
         return text;
     }

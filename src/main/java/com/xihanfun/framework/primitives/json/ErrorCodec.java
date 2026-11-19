@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.primitives.Error;
 import java.io.IOException;
 import java.io.Serial;
@@ -79,8 +80,9 @@ final class ErrorCodec {
                 return fail(context, "An error on the wire needs a string 'code'.");
             }
             JsonNode message = node.get("message");
-            if (message == null || !message.isTextual() || message.textValue().isEmpty()) {
-                return fail(context, "An error on the wire needs a non-empty string 'message'.");
+            // 空串与只有空白都不合法（RFC-0001「Result」与「空白字符」，ADR-0245）：Error 的文案至少要有一个空白之外的字符
+            if (message == null || !message.isTextual() || Whitespace.isBlank(message.textValue())) {
+                return fail(context, "An error on the wire needs a string 'message' that is not empty or whitespace.");
             }
             Optional<String> messageKey = Optional.empty();
             JsonNode key = node.get("messageKey");

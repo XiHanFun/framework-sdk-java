@@ -3,6 +3,7 @@ package com.xihanfun.framework.plugin;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
+import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.plugin.v1.PluginProto;
 import com.xihanfun.framework.primitives.BaggageKeys;
@@ -103,7 +104,8 @@ final class Wire {
     /**
      * 读入对方写来的错误（{@code invocation.md} §3）：{@code code} 不合错误码文法时整个错误换成 {@code PLUGINS_UNEXPECTED_001} +
      * {@value PluginMessages#FAILED}（{@code phase} 为 {@code invoke}）；{@code message_key} 合消息键文法的按键处理，否则成为自由文本错误，
-     * 文案取 {@code text}，为空时取 {@code code}；{@code details} 为空、通不过共同 JSON 读取检查或不是对象时当作没有细节；{@code inner} 同此。
+     * 文案取 {@code text}，为空或只有空白（{@link Whitespace}）时取 {@code code}；{@code details} 为空、通不过共同 JSON 读取检查或不是对象时当作没有细节；
+     * {@code inner} 同此。
      */
     Error readError(PluginProto.Error error) {
         String code = error.getCode();
@@ -117,7 +119,8 @@ final class Wire {
         if (!key.isEmpty() && MessageTemplate.isValidKey(key)) {
             return inner.map(nested -> Error.of(code, key, details, nested)).orElseGet(() -> Error.of(code, key, details));
         }
-        String text = error.getText().isEmpty() ? code : error.getText();
+        // Error 的文案不能只有空白（RFC-0001「空白字符」，ADR-0245）：只有空白的 text 与空串一样取 code
+        String text = Whitespace.isBlank(error.getText()) ? code : error.getText();
         return inner.map(nested -> Error.literal(code, text, details, nested)).orElseGet(() -> Error.literal(code, text, details));
     }
 

@@ -129,6 +129,31 @@ class PrimitivesTest {
     }
 
     @Test
+    void freeTextMustHaveACharacterOtherThanWhitespace() {
+        // RFC-0001「空白字符」的 25 个码位；Character.isWhitespace 与 String.isBlank 不认 U+0085、U+00A0、U+2007、U+202F，却认 U+001C–U+001F
+        String everyWhitespace = "\t\n\u000b\f\r \u0085             "
+                + "    　";
+        assertEquals(25, everyWhitespace.length());
+        List<String> blanks = new ArrayList<>(List.of("", " ", everyWhitespace, "\u0085"));
+        everyWhitespace.chars().forEach(c -> blanks.add(String.valueOf((char) c)));
+        Error keyed = Error.notFound("ORDERS_NOTFOUND_001", "orders.missing");
+        for (String blank : blanks) {
+            String shown = blank.codePoints().mapToObj(c -> String.format("U+%04X", c)).toList().toString();
+            assertThrows(IllegalArgumentException.class, () -> Error.literal("ORDERS_NOTFOUND_001", blank), "literal " + shown);
+            assertThrows(IllegalArgumentException.class, () -> Error.literal("ORDERS_NOTFOUND_001", blank, Map.of("id", 1)),
+                    "literal " + shown);
+            assertThrows(IllegalArgumentException.class, () -> keyed.withText(blank), "withText " + shown);
+            assertThrows(IllegalArgumentException.class, () -> new FrameworkException(ErrorCode.INVALID_ARGUMENT, blank),
+                    "exception " + shown);
+        }
+        for (String text : List.of("\u001c", "​", " boom\t")) {
+            assertEquals(text, Error.literal("ORDERS_NOTFOUND_001", text).message());
+            assertEquals(text, keyed.withText(text).message());
+            assertEquals(Optional.of(text), new FrameworkException(ErrorCode.INVALID_ARGUMENT, text).toError().text());
+        }
+    }
+
+    @Test
     void errorMessagesResolveThroughTheDefaultCatalog() {
         MessageScope.setDefault(MessageCatalog.of(Map.of(
                 "en-US", Map.of("orders.missing", "Order {id} was not found."),

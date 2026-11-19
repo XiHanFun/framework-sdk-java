@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.primitives.MessageTemplate;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -131,9 +132,9 @@ class PluginTypesTest {
         for (String invalid : Vectors.strings(vectors.get("invalid"))) {
             assertEquals(Optional.empty(), Endpoint.parseHandshakeLine(invalid), invalid);
         }
-        // 空白集合（handshake.md §2）与 Character.isWhitespace 不同
-        assertTrue(Endpoint.isWhitespace(' ') && Endpoint.isWhitespace(' ') && Endpoint.isWhitespace(' ') && Endpoint.isWhitespace('\u0085'));
-        assertFalse(Endpoint.isWhitespace('\u001c') || Endpoint.isWhitespace('​') || Endpoint.isWhitespace('﻿'));
+        // 空白集合（RFC-0001「空白字符」，handshake.md §2）与 Character.isWhitespace 不同
+        assertTrue(Whitespace.isWhitespace(' ') && Whitespace.isWhitespace(' ') && Whitespace.isWhitespace(' ') && Whitespace.isWhitespace('\u0085'));
+        assertFalse(Whitespace.isWhitespace('\u001c') || Whitespace.isWhitespace('​') || Whitespace.isWhitespace('﻿'));
         assertEquals("tcp 127.0.0.1:5000", new Endpoint(Network.TCP, "127.0.0.1:5000").toString());
     }
 

@@ -1,5 +1,6 @@
 package com.xihanfun.framework.primitives;
 
+import com.xihanfun.framework.internal.Whitespace;
 import java.io.Serial;
 import java.util.Map;
 import java.util.Objects;
@@ -36,8 +37,8 @@ public class FrameworkException extends RuntimeException {
      * 创建异常，没有底层原因。
      *
      * @param code 符合 {@link ErrorCode} 格式的错误码
-     * @param message 面向开发者的英文说明，不能为空串
-     * @throws IllegalArgumentException 错误码不合法或说明为空
+     * @param message 面向开发者的英文说明，不能为空，也不能只有空白（RFC-0001「空白字符」）
+     * @throws IllegalArgumentException 错误码不合法，或说明为空、只有空白
      */
     public FrameworkException(String code, String message) {
         this(code, message, null);
@@ -47,9 +48,9 @@ public class FrameworkException extends RuntimeException {
      * 创建异常。
      *
      * @param code 符合 {@link ErrorCode} 格式的错误码
-     * @param message 面向开发者的英文说明，不能为空串
+     * @param message 面向开发者的英文说明，不能为空，也不能只有空白（RFC-0001「空白字符」）
      * @param cause 底层原因；可以为 {@code null}，表示没有
-     * @throws IllegalArgumentException 错误码不合法或说明为空
+     * @throws IllegalArgumentException 错误码不合法，或说明为空、只有空白
      */
     public FrameworkException(String code, String message, Throwable cause) {
         super(requireMessage(message), cause);
@@ -95,8 +96,9 @@ public class FrameworkException extends RuntimeException {
 
     private static String requireMessage(String message) {
         Objects.requireNonNull(message, "message");
-        if (message.isEmpty()) {
-            throw new IllegalArgumentException("A framework exception needs a message.");
+        // 说明会成为 toError() 的 Literal 文案，所以同样不能只有空白（RFC-0001「空白字符」，ADR-0245），否则 toError() 会抛出
+        if (Whitespace.isBlank(message)) {
+            throw new IllegalArgumentException("A framework exception needs a message that is not empty or whitespace.");
         }
         return message;
     }

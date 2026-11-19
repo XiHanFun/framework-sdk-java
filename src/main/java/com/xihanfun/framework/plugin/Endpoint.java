@@ -1,5 +1,6 @@
 package com.xihanfun.framework.plugin;
 
+import com.xihanfun.framework.internal.Whitespace;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -22,30 +23,9 @@ record Endpoint(Network network, String address) {
     }
 
     /**
-     * 判断字符是不是握手行与回调端点所说的空白（{@code handshake.md} §2）：U+0009–U+000D、U+0020、U+0085、U+00A0、U+1680、
-     * U+2000–U+200A、U+2028、U+2029、U+202F、U+205F、U+3000。
-     *
-     * <p>这个集合与 {@link Character#isWhitespace(char)} 不同（后者不含 U+00A0、U+2007、U+202F，却含 U+001C–U+001F），所以逐个列出；
-     * 集合里的字符都在基本多文种平面，按 UTF-16 码元判断即可。
-     */
-    static boolean isWhitespace(char c) {
-        return (c >= 0x09 && c <= 0x0D) || c == 0x20 || c == 0x85 || c == 0xA0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200A)
-                || c == 0x2028 || c == 0x2029 || c == 0x202F || c == 0x205F || c == 0x3000;
-    }
-
-    /** 判断文本里有没有空白（{@link #isWhitespace(char)}）。 */
-    static boolean containsWhitespace(String text) {
-        for (int index = 0; index < text.length(); index++) {
-            if (isWhitespace(text.charAt(index))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
      * 解析 {@code <network> <address>}（{@code handshake.md} §2）：network 是 {@code unix}、{@code tcp} 或 {@code npipe}，与地址之间恰好一个空格；
-     * 地址是一个或多个空白之外的字符（含非 ASCII 字母与 {@code ;}），{@code tcp} 的地址另须是回环地址加端口（{@link #isLoopbackAddress(String)}）。
+     * 地址是一个或多个空白（{@link Whitespace}）之外的字符（含非 ASCII 字母与 {@code ;}），{@code tcp} 的地址另须是回环地址加端口
+     * （{@link #isLoopbackAddress(String)}）。
      */
     static Optional<Endpoint> parse(String text) {
         if (text == null) {
@@ -57,7 +37,7 @@ record Endpoint(Network network, String address) {
         }
         Optional<Network> network = Network.parse(text.substring(0, space));
         String address = text.substring(space + 1);
-        if (network.isEmpty() || address.isEmpty() || containsWhitespace(address)) {
+        if (network.isEmpty() || address.isEmpty() || Whitespace.containsWhitespace(address)) {
             return Optional.empty();
         }
         if (network.get() == Network.TCP && !isLoopbackAddress(address)) {

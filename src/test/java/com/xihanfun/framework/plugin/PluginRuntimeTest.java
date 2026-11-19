@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.operation.Expose;
 import com.xihanfun.framework.operation.OperationContract;
@@ -126,7 +127,7 @@ class PluginRuntimeTest {
             if (endpoint.network() == Network.TCP) {
                 assertTrue(endpoint.address().matches("127\\.0\\.0\\.1:[1-9][0-9]*"), "tcp binds only 127.0.0.1: " + plugin.line);
             }
-            assertFalse(Endpoint.containsWhitespace(endpoint.address()));
+            assertFalse(Whitespace.containsWhitespace(endpoint.address()));
             List<PluginGrpc.PluginBlockingStub> refused = List.of(plugin.withoutToken(), plugin.stub("not-the-session-token"),
                     plugin.stub(RunningPlugin.TOKEN + "x"), plugin.stub(RunningPlugin.TOKEN, "wrong"), plugin.stub("wrong", RunningPlugin.TOKEN),
                     plugin.stub(RunningPlugin.TOKEN, RunningPlugin.TOKEN));
