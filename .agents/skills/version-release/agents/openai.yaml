@@ -1,0 +1,7 @@
+interface:
+  display_name: "Java SDK 版本发布"
+  short_description: "准备 Java SDK 的版本、核对规范标签并在用户要求时发布"
+  default_prompt: "使用 $xihan-sdk-java-version-release 准备并核对一次 Java SDK 版本发布。"
+
+policy:
+  allow_implicit_invocation: true

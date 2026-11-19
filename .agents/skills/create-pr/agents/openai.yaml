@@ -1,0 +1,7 @@
+interface:
+  display_name: "Java SDK 创建 PR"
+  short_description: "检查分支并按固定几段准备与创建 Java SDK 的 Pull Request"
+  default_prompt: "使用 $xihan-sdk-java-create-pr 为当前分支准备并创建 Pull Request。"
+
+policy:
+  allow_implicit_invocation: true

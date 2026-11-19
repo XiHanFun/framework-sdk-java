@@ -1,0 +1,7 @@
+interface:
+  display_name: "Java SDK 测试与打包"
+  short_description: "照 CI 运行 Java SDK 的门禁、向量覆盖与黑盒运行器"
+  default_prompt: "使用 $xihan-sdk-java-testing-release 运行并核对 Java SDK 的全部门禁。"
+
+policy:
+  allow_implicit_invocation: true

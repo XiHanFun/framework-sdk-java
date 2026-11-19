@@ -1,0 +1,7 @@
+interface:
+  display_name: "Java SDK 变化整理"
+  short_description: "把 Java SDK 的可感知变化整理进文档页的破坏性改动与迁移"
+  default_prompt: "使用 $xihan-sdk-java-changelog-collect 整理指定范围内 Java SDK 的破坏性改动与迁移。"
+
+policy:
+  allow_implicit_invocation: true

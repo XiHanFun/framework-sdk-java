@@ -1,0 +1,7 @@
+interface:
+  display_name: "Java SDK 开发"
+  short_description: "对照规范与 .NET 实现 Java SDK 的原语、清单、上下文、管道与操作"
+  default_prompt: "使用 $xihan-sdk-java-development 实现并验证一项 Java SDK 能力。"
+
+policy:
+  allow_implicit_invocation: true

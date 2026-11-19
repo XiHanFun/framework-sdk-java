@@ -1,0 +1,7 @@
+interface:
+  display_name: "Java SDK 插件运行时"
+  short_description: "实现并用黑盒运行器验证 Java 的进程外插件运行时"
+  default_prompt: "使用 $xihan-sdk-java-plugin-runtime 修改并验证 Java 插件运行时的一项行为。"
+
+policy:
+  allow_implicit_invocation: true

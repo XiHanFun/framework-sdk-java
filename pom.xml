@@ -208,7 +208,7 @@
 
   <profiles>
     <!--
-      重新生成插件协议的 Java 代码：mvn -Pprotocol process-sources（Docker 命令见 README「开发」）。
+      重新生成插件协议的 Java 代码：mvn -Pprotocol process-sources（Docker 命令见 .agents/skills/testing-release/references/docker.md）。
       spec/plugin/plugin.proto 没有 Java 选项，先复制一份、在末尾补上 java_package 等文件选项，再以 protoc 与
       protoc-gen-grpc-java（都从 Maven Central 取，版本即 protobuf.version 与 grpc.version）生成，
       最后整个替换 src/main/java/com/xihanfun/framework/plugin/v1。生成物提交进仓库，CI 重新生成后核对没有差异。
