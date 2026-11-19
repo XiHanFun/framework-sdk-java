@@ -1,0 +1,112 @@
+name: 发布
+
+# 推送 v* 标签（如 v0.1.0-rc.1、v0.1.0）触发，构建并签名后上传到 Maven Central（com.xihanfun:xihan-framework）。
+# 不建 GitHub Release：与 XiHan.Framework 相同，发布后按需手动 gh release create vX.Y.Z --verify-tag [--prerelease]。
+#
+# 发布之前 guard 跑 scripts/release-check.sh，缺一不发：标签是 v<语义化版本>、提交在 main 的历史里、
+# 标签号等于 pom.xml 的项目版本与 FrameworkInfo.SDK_VERSION（不带 SNAPSHOT）、spec 子模块正好在规范标签上
+# （预发布可钉规范的 rc 标签，正式版只钉正式版标签，RFC-0024）。Central 上的版本发出去就不能撤回或覆盖，
+# 所以打标签之前先在本地跑同一份脚本（version-release 技能）。
+#
+# 只管发布，不跑测试：测试门禁在 ci.yml，提交进 main 时已经跑过。
+#
+# 首次发布前要在仓库 Settings → Secrets and variables → Actions 里配四个 Secrets：
+#   MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD：central.sonatype.com → View Account → Generate User Token 生成的令牌
+#     （命名空间 com.xihanfun 已在 Central 验证）；
+#   MAVEN_GPG_PRIVATE_KEY：签名用 GPG 私钥的 ASCII 导出（gpg --armor --export-secret-keys <密钥>），公钥要先发到公钥服务器；
+#   MAVEN_GPG_PASSPHRASE：这把私钥的口令。
+# 手动 Run workflow 时必须选中一个版本标签；选分支会被 guard 拦下。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: 发版核对
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+
+    steps:
+      - name: 检出
+        uses: actions/checkout@v5
+        with:
+          # 要拿完整历史才能判断祖先关系；子模块不检出，脚本读树里记的指针
+          fetch-depth: 0
+
+      - name: 只接受版本标签
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::发布只接受版本标签触发，收到 $GITHUB_REF_TYPE $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+      - name: 核对标签、版本与规范标签
+        id: check
+        run: bash scripts/release-check.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
+
+  publish:
+    name: 发布到 Maven Central
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: 检出
+        uses: actions/checkout@v5
+
+      - name: 这个版本已经发布就跳过
+        # Central 不能覆盖已发布的版本：重跑时已在就跳过上传，工作流照常以成功结束
+        id: published
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          url="https://repo1.maven.org/maven2/com/xihanfun/xihan-framework/$VERSION/xihan-framework-$VERSION.pom"
+          if curl -fsSI "$url" >/dev/null; then
+            echo "Maven Central 上已有 $VERSION，跳过上传"
+            echo "exists=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: 安装 JDK 21 并写入 Central 凭据
+        # 只写 settings.xml 的 server central（凭据取环境变量）；GPG 私钥不经 setup-java 导入：它会在 settings.xml 里写
+        # gpg.passphrase，而 pom 的签名配置开了 bestPractices，见到配置文件里的口令就会失败
+        if: steps.published.outputs.exists != 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+
+      - name: 导入 GPG 私钥
+        if: steps.published.outputs.exists != 'true'
+        env:
+          MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MAVEN_GPG_PRIVATE_KEY" ]; then
+            echo "::error::没有配置 Secret MAVEN_GPG_PRIVATE_KEY，Central 要求每个构件都带 GPG 签名。"
+            exit 1
+          fi
+          printf '%s\n' "$MAVEN_GPG_PRIVATE_KEY" | gpg --batch --import
+
+      - name: 构建、签名并上传
+        # release 配置：源码包、Javadoc 包、GPG 签名，经 Central Portal 上传并等到发布完成；口令只经环境变量 MAVEN_GPG_PASSPHRASE
+        if: steps.published.outputs.exists != 'true'
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: mvn -B -ntp -Prelease -DskipTests deploy

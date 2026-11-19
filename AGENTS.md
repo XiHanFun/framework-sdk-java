@@ -16,6 +16,7 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 | grpc-java、protobuf-java | `grpc.version`、`protobuf.version`；`<optional>true</optional>`、`requires static` | 插件运行时的传输与生成的协议代码 |
 | JUnit | JUnit 6（JUnit Platform），`junit.version` | 测试，在类路径上运行 |
 | protobuf-maven-plugin（`io.github.ascopes`） | 只在 `-Pprotocol` 配置里 | 由 `spec/plugin/plugin.proto` 生成协议代码 |
+| maven-source、maven-javadoc、maven-gpg、central-publishing 插件 | 只在 `-Prelease` 配置里 | 发布到 Maven Central：源码包、Javadoc 包、GPG 签名与 Central Portal 上传 |
 | Go | 版本见 `spec/conformance/go.mod` | 运行规范的黑盒运行器（`EchoConformanceTest`） |
 | Docker | 本机没有 Maven 时 | 镜像 `xihan-sdk-java-go`（Maven、JDK 21 与 Go），见 testing-release 技能 |
 
@@ -43,7 +44,9 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 ├─ .claude/skills -> ../.agents/skills    # Claude Code 技能兼容入口
 ├─ CLAUDE.md -> AGENTS.md                 # Claude Code 仓库指令入口
 ├─ .github/workflows/ci.yml               # 门禁：ubuntu 与 windows 上 mvn verify，ubuntu 另核对生成的协议代码
-├─ pom.xml                                # 单构件 com.xihanfun:xihan-framework：版本、依赖、编译门禁与 protocol 配置
+├─ .github/workflows/release.yml          # 发布：推送 v* 标签后核对、签名并上传 Maven Central
+├─ scripts/release-check.sh               # 发版核对：标签、main、版本与规范标签；打标签前在本地跑，release.yml 再跑一遍
+├─ pom.xml                                # 单构件 com.xihanfun:xihan-framework：版本、依赖、编译门禁、protocol 与 release 配置
 ├─ spec/                                  # 规范（XiHanFun/framework-spec 的 submodule）：RFC、约定、清单 Schema、插件协议、档表、向量与黑盒运行器
 ├─ src/main/java/
 │  ├─ module-info.java                    # JPMS 模块 com.xihanfun.framework 的导出与依赖
@@ -75,6 +78,8 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 | 只跑一个测试类 | `mvn -B -ntp test -Dtest=<测试类>` |
 | 黑盒运行器（插件目录） | `cd spec/conformance && go run ./cmd/xihan-conformance plugin --dir <插件目录> --sample '<操作>=<JSON>'` |
 | Docker（PowerShell） | `docker run --rm -v "${PWD}:/src" -w /src -v xihan-sdk-java-m2:/root/.m2 -v xihan-sdk-java-go:/root/go xihan-sdk-java-go mvn -B verify` |
+| 发版核对（打标签之前） | `bash scripts/release-check.sh v<版本>` |
+| 发布产物（不签名，只看产物） | `mvn -B -ntp -Prelease -DskipTests -Dgpg.skip package` |
 
 ## 规范与一致性
 
@@ -120,14 +125,15 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 ## 发布
 
 - 版本真源是 `pom.xml` 的 `<version>`；`FrameworkInfo.SDK_VERSION` 必须与它相同（`PrimitivesTest` 核对）。
-- 注册表是 Maven Central，坐标 `com.xihanfun:xihan-framework`；命名空间 `com.xihanfun` 已验证，尚未发布。仓库里没有发布工作流，`pom.xml` 也没有签名与发布配置。
-- 发布用用户自己的凭据，只在用户明确要求时执行。发版时 `spec` 子模块必须正好在规范标签上：预发布可以钉规范的 rc 标签，正式版只能钉正式版标签（RFC-0024）。细节见 version-release 技能。
+- 注册表是 Maven Central，坐标 `com.xihanfun:xihan-framework`；命名空间 `com.xihanfun` 已验证，尚未发布。
+- 推送 `v*` 标签触发 `.github/workflows/release.yml`：guard 跑 `scripts/release-check.sh`（标签是 v<语义化版本>、提交在 `main` 的历史里、标签号等于 `pom.xml` 与 `FrameworkInfo.SDK_VERSION` 且不带 SNAPSHOT、`spec` 正好在规范标签上：预发布可以钉规范的 rc 标签，正式版只能钉正式版标签，RFC-0024），通过后以 `-Prelease` 构建、签名并上传 Maven Central。打标签之前先在本地跑同一份脚本。工作流不建 GitHub Release：与 XiHan.Framework 相同，发布后按需手动 `gh release create v<版本> --verify-tag [--prerelease]`。
+- 上传用仓库 Secrets 里的 Central 令牌与 GPG 私钥（`MAVEN_CENTRAL_USERNAME`、`MAVEN_CENTRAL_PASSWORD`、`MAVEN_GPG_PRIVATE_KEY`、`MAVEN_GPG_PASSPHRASE`），由用户在仓库设置里配置；打标签与推送标签只在用户明确要求时执行。细节见 version-release 技能。
 
 ## 分支
 
 - 日常提交在 `dev`。
 - `main` 只在用户明确说「推送并快进 main」时由 `dev` 快进（`git fetch . dev:main`，不是快进就停下查），不在 `main` 上直接提交。
-- CI（`.github/workflows/ci.yml`）在 `main` 与 `dev` 的 push、目标为 `main` 或 `dev` 的 PR 以及手动触发时运行，矩阵是 `ubuntu-latest` 与 `windows-latest`。
+- CI（`.github/workflows/ci.yml`）在 `main` 与 `dev` 的 push、目标为 `main` 或 `dev` 的 PR 以及手动触发时运行，矩阵是 `ubuntu-latest` 与 `windows-latest`。发布（`.github/workflows/release.yml`）只在推送 `v*` 标签或在标签上手动触发时运行。
 
 ## Git 与提交
 

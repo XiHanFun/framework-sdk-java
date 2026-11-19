@@ -27,6 +27,17 @@
     <url>https://github.com/XiHanFun</url>
   </organization>
 
+  <!-- Maven Central 要求写明开发者；这里只写组织，不写个人 -->
+  <developers>
+    <developer>
+      <id>xihanfun</id>
+      <name>XiHanFun</name>
+      <url>https://github.com/XiHanFun</url>
+      <organization>XiHanFun</organization>
+      <organizationUrl>https://github.com/XiHanFun</organizationUrl>
+    </developer>
+  </developers>
+
   <scm>
     <url>https://github.com/XiHanFun/framework-sdk-java</url>
     <connection>scm:git:https://github.com/XiHanFun/framework-sdk-java.git</connection>
@@ -53,6 +64,11 @@
     <maven-site-plugin.version>3.21.0</maven-site-plugin.version>
     <maven-antrun-plugin.version>3.2.0</maven-antrun-plugin.version>
     <protobuf-maven-plugin.version>5.1.12</protobuf-maven-plugin.version>
+    <!-- 发布到 Maven Central（release 配置）：源码包、Javadoc 包、GPG 签名与 Central Portal 上传 -->
+    <maven-source-plugin.version>3.4.0</maven-source-plugin.version>
+    <maven-javadoc-plugin.version>3.12.0</maven-javadoc-plugin.version>
+    <maven-gpg-plugin.version>3.2.8</maven-gpg-plugin.version>
+    <central-publishing-maven-plugin.version>0.12.0</central-publishing-maven-plugin.version>
   </properties>
 
   <dependencyManagement>
@@ -290,6 +306,80 @@ option java_outer_classname = "PluginProto";
                 </configuration>
               </execution>
             </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!--
+      发布到 Maven Central：mvn -Prelease -DskipTests deploy（由 .github/workflows/release.yml 在推送版本标签后执行）。
+      Central 要求每个构件都带源码包、Javadoc 包与 GPG 签名；上传走 Central Portal（central.sonatype.com），
+      凭据在 settings.xml 的 server central 里，GPG 口令取环境变量 MAVEN_GPG_PASSPHRASE。
+      本地只想看产物时加 -Dgpg.skip 跳过签名。
+    -->
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <version>${maven-source-plugin.version}</version>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <goals>
+                  <goal>jar-no-fork</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <version>${maven-javadoc-plugin.version}</version>
+            <configuration>
+              <!-- 与编译期的 doclint 同一口径：核对语法与引用，缺少 @param 不报 -->
+              <doclint>all,-missing</doclint>
+            </configuration>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>${maven-gpg-plugin.version}</version>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>sign</goal>
+                </goals>
+                <configuration>
+                  <!-- 口令只从环境变量 MAVEN_GPG_PASSPHRASE 取，不写进 settings.xml 或命令行 -->
+                  <bestPractices>true</bestPractices>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>${central-publishing-maven-plugin.version}</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <!-- 校验通过即发布，并等到 Central 确认已发布：工作流结束时版本已经能取到 -->
+              <autoPublish>true</autoPublish>
+              <waitUntil>published</waitUntil>
+            </configuration>
           </plugin>
         </plugins>
       </build>
