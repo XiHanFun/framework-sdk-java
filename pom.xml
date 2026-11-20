@@ -7,7 +7,7 @@
 
   <groupId>com.xihanfun</groupId>
   <artifactId>xihan-framework</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.2.0-rc.1</version>
 
   <name>XiHan Framework SDK for Java</name>
   <description>XiHan Framework Spec 的 Java 实现：原语、清单、调用上下文、管道、操作契约与进程外插件运行时。</description>

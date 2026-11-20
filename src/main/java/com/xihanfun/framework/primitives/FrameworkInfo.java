@@ -16,7 +16,7 @@ public final class FrameworkInfo {
     public static final String SDK_NAME = "framework-sdk-java";
 
     /** 本 SDK 的版本，与 Maven 项目版本相同。 */
-    public static final String SDK_VERSION = "0.1.0-SNAPSHOT";
+    public static final String SDK_VERSION = "0.2.0-rc.1";
 
     /** 插件握手时上报的实现语言。 */
     public static final String SDK_LANGUAGE = "java";
