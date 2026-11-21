@@ -42,7 +42,7 @@
 
 ## 安装
 
-需要 JDK 21+。Maven Central 命名空间 `com.xihanfun` 已验证，构件尚未发布：
+需要 JDK 21+。构件发布在 Maven Central，目前只有预发布版；`${xihan-framework.version}` 换成 [Releases](https://github.com/XiHanFun/framework-sdk-java/releases) 里的版本（不带 `v`）：
 
 ```xml
 <dependency>
@@ -91,7 +91,7 @@ OperationResponse response = invoker.invoke(context, OperationRequest.of("orders
 
 ## 状态
 
-在有钉在规范标签上的发布版之前是 Experimental（RFC-0024）。本 SDK 认领一致性档 `core` 与 `plugin`，没有缺口，钉的规范版本是 `spec/` 子模块指向的提交；细节见文档页的「一致性」一节。
+成熟度是 Experimental（RFC-0024）：已有钉在规范 rc 标签上的预发布版，到 Stable 还要钉在规范正式版标签上的发布版。本 SDK 认领一致性档 `core` 与 `plugin`，没有缺口，钉的规范版本是 `spec/` 子模块指向的提交；细节见文档页的「一致性」一节。
 
 ## 生态
 

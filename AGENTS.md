@@ -125,7 +125,7 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 ## 发布
 
 - 版本真源是 `pom.xml` 的 `<version>`；`FrameworkInfo.SDK_VERSION` 必须与它相同（`PrimitivesTest` 核对）。
-- 注册表是 Maven Central，坐标 `com.xihanfun:xihan-framework`；命名空间 `com.xihanfun` 已验证，尚未发布。
+- 注册表是 Maven Central，坐标 `com.xihanfun:xihan-framework`；命名空间 `com.xihanfun` 已验证，版本由 `release.yml` 发布；目前只有预发布版，README 与文档页写着「目前只有预发布版」，首个正式版发布后改掉。
 - 推送 `v*` 标签触发 `.github/workflows/release.yml`：guard 跑 `scripts/release-check.sh`（标签是 v<语义化版本>、提交在 `main` 的历史里、标签号等于 `pom.xml` 与 `FrameworkInfo.SDK_VERSION` 且不带 SNAPSHOT、`spec` 正好在规范标签上：预发布可以钉规范的 rc 标签，正式版只能钉正式版标签，RFC-0024），通过后以 `-Prelease` 构建、签名并上传 Maven Central。打标签之前先在本地跑同一份脚本。工作流不建 GitHub Release：与 XiHan.Framework 相同，发布后按需手动 `gh release create v<版本> --verify-tag [--prerelease]`。
 - 上传用仓库 Secrets 里的 Central 令牌与 GPG 私钥（`MAVEN_CENTRAL_USERNAME`、`MAVEN_CENTRAL_PASSWORD`、`MAVEN_GPG_PRIVATE_KEY`、`MAVEN_GPG_PASSPHRASE`），由用户在仓库设置里配置；打标签与推送标签只在用户明确要求时执行。细节见 version-release 技能。
 

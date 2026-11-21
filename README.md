@@ -42,7 +42,7 @@ The only regular dependency is `jackson-databind`. grpc-java and protobuf-java, 
 
 ## Installation
 
-Requires JDK 21+. The Maven Central namespace `com.xihanfun` is verified; the artifact is not yet published:
+Requires JDK 21+. The artifact is on Maven Central and only prereleases are published so far; replace `${xihan-framework.version}` with a version from [Releases](https://github.com/XiHanFun/framework-sdk-java/releases) (without the `v`):
 
 ```xml
 <dependency>
@@ -93,7 +93,7 @@ The documentation site is in Chinese.
 
 ## Status
 
-Experimental until there is a release pinned to a spec tag (RFC-0024). This SDK claims the conformance profiles `core` and `plugin` with no gaps, and pins the spec at the commit of the `spec/` submodule; details are in the conformance section of the docs page.
+The maturity is Experimental (RFC-0024): there is a prerelease pinned to a spec rc tag, and Stable also needs a release pinned to a formal spec tag. This SDK claims the conformance profiles `core` and `plugin` with no gaps, and pins the spec at the commit of the `spec/` submodule; details are in the conformance section of the docs page.
 
 ## Ecosystem
 

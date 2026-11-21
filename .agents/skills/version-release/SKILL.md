@@ -8,8 +8,8 @@ description: 为 framework-sdk-java 准备版本、修改 pom.xml 的版本、�
 ## 版本真源
 
 - `pom.xml` 的 `<version>` 是唯一的版本真源；`FrameworkInfo.SDK_VERSION`（插件握手时上报的 SDK 版本）必须与它相同，`PrimitivesTest` 核对。
-- 开发期是 `-SNAPSHOT` 版本；正式发布时去掉 `-SNAPSHOT`。标签写成 `v<版本>`，例如首发计划的 `v0.1.0`。
-- 坐标 `com.xihanfun:xihan-framework`，注册表 Maven Central；命名空间 `com.xihanfun` 已在 central.sonatype.com 验证，还没有发布过。
+- 开发期是 `-SNAPSHOT` 版本；正式发布时去掉 `-SNAPSHOT`。标签写成 `v<版本>`，例如 `v0.2.0-rc.1`。
+- 坐标 `com.xihanfun:xihan-framework`，注册表 Maven Central；命名空间 `com.xihanfun` 已在 central.sonatype.com 验证。目前只有预发布版，README 与文档页写着「目前只有预发布版」，首个正式版发布后改掉。
 
 ## 与规范标签的关系（RFC-0024「实现钉规范」）
 
@@ -21,7 +21,7 @@ description: 为 framework-sdk-java 准备版本、修改 pom.xml 的版本、�
 
 每一步都在用户要求之后才做，不替用户选版本号：
 
-1. 工作区干净，在 `dev` 上；核对上一个标签（首发时是全部历史）到当前提交的公开 API 与行为变化，文档页的「破坏性改动与迁移」已写全（changelog-collect 技能）。
+1. 工作区干净，在 `dev` 上；核对上一个标签到当前提交的公开 API 与行为变化，文档页的「破坏性改动与迁移」已写全（changelog-collect 技能）。
 2. 改 `pom.xml` 的 `<version>` 与 `FrameworkInfo.SDK_VERSION`，单独提交（与 XiHan.Framework 一样写 `build: v<版本>`）。
 3. 跑 `mvn -B -ntp verify`（本机见 testing-release 技能的 Docker 用法），核对 `target/xihan-framework-<版本>.jar` 与 CI 全绿；要看发布产物时跑 `mvn -B -ntp -Prelease -DskipTests -Dgpg.skip package`，`target/` 里另有 `-sources.jar` 与 `-javadoc.jar`。
 4. 用户明确说「推送并快进 main」时由 `dev` 快进 `main`（`git fetch . dev:main`，不是快进就停下查），推送并等 CI 全绿。
@@ -39,5 +39,5 @@ description: 为 framework-sdk-java 准备版本、修改 pom.xml 的版本、�
 
 - 打标签之前在本地 `main` 的那个提交上跑 `bash scripts/release-check.sh v<版本>`，全部通过再打。Central 上的版本发出后不能撤回或覆盖，发错了只能用下一个号。
 - 打标签与推送标签都是外部状态变更：只有用户明确要求时 `git tag -a v<版本> -m "v<版本>" main` 并 `git push origin v<版本>`，然后等 release.yml 跑完。
-- 首次发布前，用户要在仓库 Settings → Secrets and variables → Actions 里配四个 Secrets：`MAVEN_CENTRAL_USERNAME` 与 `MAVEN_CENTRAL_PASSWORD`（central.sonatype.com → View Account → Generate User Token，命名空间 `com.xihanfun` 已验证）、`MAVEN_GPG_PRIVATE_KEY`（签名私钥的 ASCII 导出，公钥要先发到公钥服务器）、`MAVEN_GPG_PASSPHRASE`。凭据只经 Secrets，不写进仓库、命令行历史或日志。
+- 首次发布前，用户要在仓库 Settings → Secrets and variables → Actions 里配四个 Secrets：`MAVEN_CENTRAL_USERNAME` 与 `MAVEN_CENTRAL_PASSWORD`（central.sonatype.com → View Account → Generate User Token，必须由拥有命名空间 `com.xihanfun` 的账号生成，不同登录方式是不同账号，用错了 Central 校验报 `Namespace 'com.xihanfun' is not allowed`）、`MAVEN_GPG_PRIVATE_KEY`（签名私钥的 ASCII 导出；公钥要先发到 keyserver.ubuntu.com 或 keys.openpgp.org，Central 按指纹去那里找，找不到报 `Could not find a public key`）、`MAVEN_GPG_PASSPHRASE`。凭据只经 Secrets，不写进仓库、命令行历史或日志。
 - 发布后核对 Maven Central 上的构件（`https://central.sonatype.com/artifact/com.xihanfun/xihan-framework/<版本>`）、文档页与 README 的安装说明。用户要 GitHub Release 时手动 `gh release create v<版本> --verify-tag [--prerelease]`（预发布加 `--prerelease`），正文写钉的规范标签与构件地址。之后 `dev` 上改回哪个 `-SNAPSHOT` 版本由用户决定。
