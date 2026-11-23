@@ -25,7 +25,7 @@ description: 实现、修复或审查 framework-sdk-java 的进程外插件运�
 - 生成的协议代码：`src/main/java/com/xihanfun/framework/plugin/v1/`（不导出、不手改）。
 - 运行时消息：`PluginMessages` 与 `src/main/resources/com/xihanfun/framework/plugin/Localization/<区域>.json`（10 种区域，与参考实现相同的文案）。
 - 示例插件：`examples/echo`（`EchoPlugin` 与 `xihan.manifest.json`），随测试编译、不进构件。
-- 测试：`src/test/java/com/xihanfun/framework/plugin/`：`PluginRuntimeTest`、`PluginCallsTest`、`PluginShutdownTest`、`PluginTypesTest`、`HostCallbackTest`、`EchoConformanceTest`，测试辅助 `RunningPlugin`、`Vectors`。
+- 测试：`src/test/java/com/xihanfun/framework/plugin/`：`PluginRuntimeTest`、`PluginCallsTest`、`PluginShutdownTest`、`PluginTypesTest`、`HostCallbackTest`、`EchoConformanceTest`，测试辅助 `RunningPlugin`；向量与仓库根经各测试包共用的 `com.xihanfun.framework.Vectors` 读取。
 
 ## 黑盒运行器
 

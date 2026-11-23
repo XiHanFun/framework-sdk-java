@@ -1,6 +1,6 @@
 # 包、规范、向量与测试
 
-源码在 `src/main/java/com/xihanfun/framework/`，测试在 `src/test/java/com/xihanfun/framework/` 的同名包里；每个测试包有一个 `Vectors` 辅助类，按仓库根的相对路径读 `spec/conformance/vectors/`。
+源码在 `src/main/java/com/xihanfun/framework/`，测试在 `src/test/java/com/xihanfun/framework/` 的同名包里；读向量的测试辅助只有一份，`com.xihanfun.framework.Vectors`（`src/test/java/com/xihanfun/framework/Vectors.java`，与 `VectorCoverageTest` 同包），各测试包导入它，按仓库根的相对路径读 `spec/conformance/vectors/`，不在测试包里另写一份。
 
 | Java 包 | 主要类型 | 规范 | 回放的向量 | 测试 |
 | --- | --- | --- | --- | --- |
@@ -11,7 +11,7 @@
 | `pipeline` | `PipelineBuilder`、`Middleware`、`Placement`、`Step`、`PipelineErrors` | RFC-0004 | `pipeline/ordering.json` | `PipelineBuilderTest`、`OrderingVectorsTest` |
 | `operation` | `OperationContract`、`OperationSchema`、`OperationHandler`、`OperationRegistry`、`OperationInvoker`、`OperationRequest`、`OperationResponse`、`Operations`、`OperationJson`、`RequestShape`，内置步骤 `ObserveMiddleware`、`ValidationMiddleware`、`DeadlineMiddleware`，`OperationMessages`、`OperationErrors` | RFC-0011 | `operations/payload-reasons.json`、`primitives/kernel-messages.json` | `OperationInvokerTest`、`PayloadReasonsVectorsTest`、`ResponseEncodingTest`、`UnhandledExceptionTest`、`KernelMessagesTest` |
 | `plugin` | 见 plugin-runtime 技能 | RFC-0017、`spec/plugin/` | `plugin/*.json` | 见 plugin-runtime 技能 |
-| `internal` | `Whitespace` | RFC-0001「空白字符」 | 经 `wire-encoding.json`、`handshake-lines.json` 间接覆盖 | 随使用它的包 |
+| `internal` | `Whitespace`、`WireNames`（各枚举 `parse` 共用的按线上名字查找）、`Grammars`（不止一个包要核对的文法，如操作 ID） | RFC-0001「空白字符」、RFC-0011「操作 ID」 | 经 `wire-encoding.json`、`handshake-lines.json`、`manifests.json` 间接覆盖 | 随使用它的包 |
 
 `VectorCoverageTest`（`src/test/java/com/xihanfun/framework/`）的 `REPLAYED` 是回放清单的唯一登记处，注释写读取它的测试类；新增回放时同时改这里。
 

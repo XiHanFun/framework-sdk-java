@@ -12,8 +12,8 @@ import java.util.regex.Pattern;
  * @param version 接口版本，至少为 1
  */
 public record CapabilityDeclaration(String id, int version) {
-    /** 声明文本的文法。 */
-    private static final Pattern PATTERN = Pattern.compile("^([a-z][a-z0-9]*\\.[a-z][a-z0-9-]*)@([1-9][0-9]*)$");
+    /** 声明文本的文法：能力 ID（{@link CapabilityId} 的那一份文法）、{@code @}、接口版本。 */
+    private static final Pattern PATTERN = Pattern.compile("^(" + CapabilityId.GRAMMAR + ")@([1-9][0-9]*)$");
 
     /**
      * 创建声明。

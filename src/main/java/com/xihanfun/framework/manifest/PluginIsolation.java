@@ -1,5 +1,6 @@
 package com.xihanfun.framework.manifest;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.Optional;
 
 /**
@@ -27,12 +28,7 @@ public enum PluginIsolation {
      * @return 隔离级别；名字未知时为空
      */
     public static Optional<PluginIsolation> parse(String name) {
-        for (PluginIsolation isolation : values()) {
-            if (isolation.wireName.equals(name)) {
-                return Optional.of(isolation);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), PluginIsolation::wireName, name);
     }
 
     /**

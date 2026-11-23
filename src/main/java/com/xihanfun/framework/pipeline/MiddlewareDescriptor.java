@@ -108,6 +108,6 @@ public final class MiddlewareDescriptor {
      */
     @Override
     public String toString() {
-        return stage.manifestName() + " " + display();
+        return stage.wireName() + " " + display();
     }
 }

@@ -125,7 +125,7 @@ class VectorCoverageTest {
      * 读档表 {@code spec/conformance/profiles.json}：档 ID 到该档必须回放的向量。
      */
     private static Map<String, Set<String>> profiles() throws IOException {
-        Path file = root().resolve("spec/conformance/profiles.json");
+        Path file = Vectors.root().resolve("spec/conformance/profiles.json");
         if (!Files.isRegularFile(file)) {
             throw new IllegalStateException("The conformance profiles '" + file + "' are missing; run 'git submodule update --init'.");
         }
@@ -142,7 +142,7 @@ class VectorCoverageTest {
      * 递归列出 {@code spec/conformance/vectors} 下的全部 {@code .json} 文件，路径相对 {@code vectors/}、以 {@code /} 分隔。
      */
     private static Set<String> files() throws IOException {
-        Path vectors = root().resolve("spec/conformance/vectors");
+        Path vectors = Vectors.root().resolve("spec/conformance/vectors");
         if (!Files.isDirectory(vectors)) {
             throw new IllegalStateException("The conformance vectors '" + vectors + "' are missing; run 'git submodule update --init'.");
         }
@@ -152,23 +152,5 @@ class VectorCoverageTest {
                     .map(path -> vectors.relativize(path).toString().replace('\\', '/'))
                     .collect(Collectors.toCollection(TreeSet::new));
         }
-    }
-
-    /**
-     * 仓库根：Maven 经系统属性传入；在 IDE 里直接运行时从工作目录向上找含 spec/ 的目录。
-     */
-    private static Path root() {
-        String configured = System.getProperty("xihan.repository.root");
-        if (configured != null) {
-            return Path.of(configured).toAbsolutePath().normalize();
-        }
-        Path current = Path.of("").toAbsolutePath();
-        while (current != null && !Files.isDirectory(current.resolve("spec/conformance"))) {
-            current = current.getParent();
-        }
-        if (current == null) {
-            throw new IllegalStateException("The repository root with 'spec/' could not be found.");
-        }
-        return current;
     }
 }

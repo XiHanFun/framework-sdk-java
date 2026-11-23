@@ -2,13 +2,16 @@ package com.xihanfun.framework.manifest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.MessageTemplate;
+import com.xihanfun.framework.primitives.Result;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
@@ -25,7 +28,10 @@ class ManifestVectorsTest {
     void validManifestsReadAndWriteTheExpectedText() throws IOException {
         for (JsonNode vector : Vectors.read("manifest/manifests.json").get("valid")) {
             String name = vector.get("name").textValue();
-            Manifest manifest = ManifestJson.read(text(vector));
+            Result<Manifest> read = ManifestJson.tryRead(text(vector));
+            assertTrue(read.isOk(), name + ": " + read);
+            Manifest manifest = read.value().orElseThrow();
+            assertEquals(manifest, ManifestJson.read(text(vector)), name + ": the throwing entry reads the same manifest");
             String written = ManifestJson.write(manifest);
             assertEquals(vector.get("written").textValue(), written, name + ": written text");
             assertEquals(manifest, ManifestJson.read(written), name + ": the written manifest reads back the same");
@@ -42,7 +48,11 @@ class ManifestVectorsTest {
             String name = vector.get("name").textValue();
             JsonNode expected = vector.get("error");
             String text = text(vector);
-            Error error = assertThrows(FrameworkException.class, () -> ManifestJson.read(text), name + " must be rejected").toError();
+            // 读取的失败是可恢复的失败，以结果返回（与 .NET 的 ManifestReader.Read 相同）
+            Error error = ManifestJson.tryRead(text).error().orElseThrow(() -> new AssertionError(name + " must be rejected"));
+            // 抛异常的入口是它的包装：同一个错误，码、消息键与参数原样在 toError() 里
+            assertEquals(error, assertThrows(FrameworkException.class, () -> ManifestJson.read(text), name + " must be rejected").toError(),
+                    name + ": the throwing entry carries the same error");
             assertEquals(expected.get("code").textValue(), error.code(), name);
             assertEquals(Optional.of(expected.get("messageKey").textValue()), error.messageKey(), name);
             Map<String, Object> arguments = MAPPER.convertValue(expected.get("arguments"), new TypeReference<>() { });

@@ -123,10 +123,10 @@ class UnhandledExceptionTest {
         assertEquals(1, authorized.get());
     }
 
-    /** 等到截止令牌触发（{@link Context#cancellation()} 报超时），最多 5 秒；外部令牌先触发时仍接着等。 */
+    /** 等到截止令牌触发（{@link Context#cancellationError()} 报超时），最多 5 秒；外部令牌先触发时仍接着等。 */
     private static void awaitDeadline(Context context) {
         long until = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-        while (!context.cancellation().map(Error::code).filter(InvocationErrors.DEADLINE_EXCEEDED::equals).isPresent() && System.nanoTime() < until) {
+        while (!context.cancellationError().map(Error::code).filter(InvocationErrors.DEADLINE_EXCEEDED::equals).isPresent() && System.nanoTime() < until) {
             try {
                 context.awaitCancellation(java.time.Duration.ofMillis(10));
                 Thread.sleep(5);

@@ -458,7 +458,7 @@ public final class PluginRuntime {
             Thread.currentThread().interrupt();
         } finally {
             lifecycle.transition(LifecycleState.STOPPED, null);
-            logger.information("stopped", Map.of("state", lifecycle.state().stateName()));
+            logger.information("stopped", Map.of("state", lifecycle.state().wireName()));
             stopped.countDown();
         }
     }
@@ -772,7 +772,7 @@ public final class PluginRuntime {
                 .map(descriptor -> descriptor.contract().id())
                 .collect(Collectors.joining(",")));
         fields.put("subscriptions", options.subscriptions().size());
-        fields.put("state", lifecycle.state().stateName());
+        fields.put("state", lifecycle.state().wireName());
         return fields;
     }
 

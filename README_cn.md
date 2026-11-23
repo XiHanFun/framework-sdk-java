@@ -33,7 +33,7 @@
 | `com.xihanfun.framework.primitives` | `Error`、`Result<T>`、`Maybe<T>`、`TypedId`、生命周期状态、消息键与模板 | RFC-0001、RFC-0010 |
 | `com.xihanfun.framework.primitives.json` | 线上 JSON 编码：Jackson 模块 `PrimitivesModule` | RFC-0001 |
 | `com.xihanfun.framework.manifest` | `xihan.manifest.json` 的读取、写出与校验 | RFC-0002 |
-| `com.xihanfun.framework.invocation` | `Context`：取消与截止时间、W3C 追踪、已登记的 Baggage | RFC-0003 |
+| `com.xihanfun.framework.invocation` | `Context`：取消与截止时间、W3C 追踪、已登记的 Baggage、请求作用域对象袋与按派生传递的值 | RFC-0003 |
 | `com.xihanfun.framework.pipeline` | 十一阶段的 `PipelineBuilder` 与排序规则 | RFC-0004 |
 | `com.xihanfun.framework.operation` | 操作契约、`OperationRegistry` 与 `OperationInvoker` | RFC-0011 |
 | `com.xihanfun.framework.plugin` | 进程外插件运行时 `PluginRuntime.serve`，基于 grpc-java | RFC-0017 |

@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.JsonText;
+import com.xihanfun.framework.primitives.KernelMessages;
 import com.xihanfun.framework.primitives.PipelineStage;
+import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Stability;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -25,14 +27,19 @@ import java.util.function.Function;
 /**
  * 清单的 JSON 读取与写出（RFC-0002 解析规则 2 与「写出」，ADR-0236），与 .NET 的 {@code ManifestReader} 报同样的错误、写出同样的文本。
  *
+ * <p>读取的失败是可恢复的失败：{@link #tryRead(byte[])}、{@link #tryRead(String)} 与 {@link #tryReadFile(Path)} 以
+ * {@link Result} 返回（与 .NET 的 {@code ManifestReader.Read} / {@code ReadFile} 相同）；{@link #read(byte[])}、{@link #read(String)} 与
+ * {@link #readFile(Path)} 是它们的包装，把同一个错误以 {@link FrameworkException} 抛出，供把清单不合法当作配置错误的调用方使用。
+ *
  * <p>读取按这个顺序，每一步只报第一处问题；错误码都是 {@value #INVALID_MANIFEST}：
  * <ol>
  *   <li>JSON 文本：过 RFC-0001「JSON 文本」的共同检查。不是 JSON 为 {@code kernel.manifest.invalid_json}（{@code reason} 为 {@code $}），
- *       任何一层有重复成员时同一个键、{@code reason} 为第一处重复的路径。{@link #read(byte[])} 按原样检查，开头的 BOM 是语法错误；
- *       {@link #readFile(Path)} 跳过开头的 UTF-8 BOM，文件不存在为 {@code kernel.manifest.file_missing}（参数 {@code path}）</li>
+ *       任何一层有重复成员时同一个键、{@code reason} 为第一处重复的路径。{@link #tryRead(byte[])} 按原样检查，开头的 BOM 是语法错误；
+ *       {@link #tryReadFile(Path)} 跳过开头的 UTF-8 BOM，文件不存在为 {@code kernel.manifest.file_missing}（参数 {@code path}）</li>
  *   <li>根是字面量 {@code null}：{@code kernel.manifest.empty}，没有参数</li>
  *   <li>形状：按 Schema 逐项核对（{@link ManifestShape}），第一处问题为 {@code kernel.manifest.invalid}，{@code reason} 是该处的路径</li>
- *   <li>跨字段约束（{@link Manifest.Builder#build()}）：保留 {@code primitives.manifest.*} 的消息键与参数 {@code id}，错误码换成 {@value #INVALID_MANIFEST}</li>
+ *   <li>跨字段约束（{@link Manifest.Builder#validate()}）：保留 {@code primitives.manifest.*} 的消息键与参数 {@code id}，
+ *       错误码换成 {@value #INVALID_MANIFEST}</li>
  * </ol>
  *
  * <p>写出的排版是规范的一部分：两个空格缩进、只用 LF、末尾不换行、成员名与值之间是 {@code ": "}；成员按 Schema 的顺序，没有值的可选成员不写，
@@ -43,17 +50,17 @@ public final class ManifestJson {
     /** 清单读取失败的错误码（.NET 的 {@code KernelErrors.InvalidManifest}）。 */
     public static final String INVALID_MANIFEST = "KERNEL_CAPABILITY_006";
 
-    /** 不是 JSON 或有重复成员，参数 {@code reason}。 */
-    public static final String INVALID_JSON = "kernel.manifest.invalid_json";
+    /** 不是 JSON 或有重复成员，参数 {@code reason}；键的文本在 {@link KernelMessages} 里。 */
+    public static final String INVALID_JSON = KernelMessages.MANIFEST_INVALID_JSON;
 
     /** 根是字面量 {@code null}，没有参数。 */
-    public static final String EMPTY = "kernel.manifest.empty";
+    public static final String EMPTY = KernelMessages.MANIFEST_EMPTY;
 
     /** 不合 Schema，参数 {@code reason}。 */
-    public static final String INVALID = "kernel.manifest.invalid";
+    public static final String INVALID = KernelMessages.MANIFEST_INVALID;
 
     /** 清单文件不存在，参数 {@code path}。 */
-    public static final String FILE_MISSING = "kernel.manifest.file_missing";
+    public static final String FILE_MISSING = KernelMessages.MANIFEST_FILE_MISSING;
 
     /** 写出时固定的 {@code $schema}。 */
     public static final String SCHEMA_URI = "https://spec.xihanfun.com/manifest/v1.json";
@@ -67,17 +74,16 @@ public final class ManifestJson {
     }
 
     /**
-     * 读取 UTF-8 编码的清单。
+     * 读取 UTF-8 编码的清单，失败以结果返回。
      *
      * @param utf8 原样的字节；开头的 BOM 是语法错误
-     * @return 清单
-     * @throws FrameworkException 读取失败（{@value #INVALID_MANIFEST}，消息键与参数见类说明）
+     * @return 清单；读取失败时为 {@value #INVALID_MANIFEST}，消息键与参数见类说明
      */
-    public static Manifest read(byte[] utf8) {
+    public static Result<Manifest> tryRead(byte[] utf8) {
         Objects.requireNonNull(utf8, "utf8");
         Optional<JsonText.Problem> problem = JsonText.check(utf8);
         if (problem.isPresent()) {
-            throw failure(INVALID_JSON, Map.of("reason", problem.get().path()));
+            return failure(INVALID_JSON, Map.of("reason", problem.get().path()));
         }
         JsonNode root;
         try {
@@ -86,42 +92,81 @@ public final class ManifestJson {
             throw new IllegalStateException("The manifest passed the JSON text check but Jackson could not read it.", impossible);
         }
         if (root.isNull()) {
-            throw failure(EMPTY, Map.of());
+            return failure(EMPTY, Map.of());
         }
         Optional<String> path = ManifestShape.findProblem(root);
         if (path.isPresent()) {
-            throw failure(INVALID, Map.of("reason", path.get()));
+            return failure(INVALID, Map.of("reason", path.get()));
         }
-        Manifest.Builder builder = convert(root);
+        Result<Manifest> built;
         try {
-            return builder.build();
-        } catch (FrameworkException crossField) {
-            // 形状已核对，到这里只剩跨字段约束：保留它的消息键与参数，错误码换成清单读取失败
-            Error error = crossField.toError();
-            if (error.messageKey().filter(key -> key.startsWith("primitives.manifest.")).isEmpty()) {
-                throw new IllegalStateException("The manifest passed the schema check but was rejected: " + error.message(), crossField);
-            }
-            throw new FrameworkException(Error.of(INVALID_MANIFEST, error.messageKey().get(), error.details()));
+            built = convert(root).tryBuild();
+        } catch (FrameworkException defect) {
+            // 形状已核对：单个字段的格式不会再失败；失败说明 ManifestShape 与构建器的规则不一致，按缺陷抛出
+            throw new IllegalStateException("The manifest passed the schema check but was rejected: " + defect.getMessage(), defect);
         }
+        // 到这里只会是跨字段约束的失败：保留它的消息键与参数，错误码换成清单读取失败（与 .NET 的 WithCode 相同）
+        return built.isOk() ? built : Result.fail(built.error().orElseThrow().withCode(INVALID_MANIFEST));
     }
 
     /**
-     * 读取清单文本：按 UTF-8 编码后读，有孤立的代理项（编不成 UTF-8）时是 {@code kernel.manifest.invalid_json}。
+     * 读取清单文本，失败以结果返回：按 UTF-8 编码后读，有孤立的代理项（编不成 UTF-8）时是 {@code kernel.manifest.invalid_json}。
+     *
+     * @param json 清单文本
+     * @return 清单；读取失败时为 {@value #INVALID_MANIFEST}
+     */
+    public static Result<Manifest> tryRead(String json) {
+        Optional<byte[]> utf8 = JsonText.encode(Objects.requireNonNull(json, "json"));
+        if (utf8.isEmpty()) {
+            return failure(INVALID_JSON, Map.of("reason", JsonText.ROOT));
+        }
+        return tryRead(utf8.get());
+    }
+
+    /**
+     * 读取清单文件，失败以结果返回：按 UTF-8 读，跳过开头的 UTF-8 BOM；不是合法 UTF-8 时同样是 {@code kernel.manifest.invalid_json}。
+     *
+     * <p>文件存在却读不出来不是清单的错误，规范没有给它错误码：与 .NET 的 {@code ReadFile} 一样照常抛出 I/O 异常。
+     *
+     * @param path 清单文件，通常名为 {@value Manifest#FILE_NAME}
+     * @return 清单；文件不存在时为 {@code kernel.manifest.file_missing}（参数 {@code path} 是给出的路径），其余读取失败同
+     *     {@link #tryRead(byte[])}
+     * @throws IOException 文件存在但读不出来
+     */
+    public static Result<Manifest> tryReadFile(Path path) throws IOException {
+        Objects.requireNonNull(path, "path");
+        if (!Files.isRegularFile(path)) {
+            return failure(FILE_MISSING, Map.of("path", path.toString()));
+        }
+        byte[] bytes = Files.readAllBytes(path);
+        boolean bom = bytes.length >= UTF8_BOM.length && Arrays.equals(bytes, 0, UTF8_BOM.length, UTF8_BOM, 0, UTF8_BOM.length);
+        return tryRead(bom ? Arrays.copyOfRange(bytes, UTF8_BOM.length, bytes.length) : bytes);
+    }
+
+    /**
+     * 读取 UTF-8 编码的清单；{@link #tryRead(byte[])} 的包装，失败时抛出。
+     *
+     * @param utf8 原样的字节；开头的 BOM 是语法错误
+     * @return 清单
+     * @throws FrameworkException 读取失败（{@value #INVALID_MANIFEST}，消息键与参数见类说明）
+     */
+    public static Manifest read(byte[] utf8) {
+        return orThrow(tryRead(utf8));
+    }
+
+    /**
+     * 读取清单文本；{@link #tryRead(String)} 的包装，失败时抛出。
      *
      * @param json 清单文本
      * @return 清单
      * @throws FrameworkException 读取失败
      */
     public static Manifest read(String json) {
-        Optional<byte[]> utf8 = JsonText.encode(Objects.requireNonNull(json, "json"));
-        if (utf8.isEmpty()) {
-            throw failure(INVALID_JSON, Map.of("reason", JsonText.ROOT));
-        }
-        return read(utf8.get());
+        return orThrow(tryRead(json));
     }
 
     /**
-     * 读取清单文件：按 UTF-8 读，跳过开头的 UTF-8 BOM；不是合法 UTF-8 时同样是 {@code kernel.manifest.invalid_json}。
+     * 读取清单文件；{@link #tryReadFile(Path)} 的包装，失败时抛出。
      *
      * @param path 清单文件，通常名为 {@value Manifest#FILE_NAME}
      * @return 清单
@@ -129,13 +174,7 @@ public final class ManifestJson {
      * @throws FrameworkException 文件不存在（{@code kernel.manifest.file_missing}，参数 {@code path} 是给出的路径），或读取失败
      */
     public static Manifest readFile(Path path) throws IOException {
-        Objects.requireNonNull(path, "path");
-        if (!Files.isRegularFile(path)) {
-            throw failure(FILE_MISSING, Map.of("path", path.toString()));
-        }
-        byte[] bytes = Files.readAllBytes(path);
-        boolean bom = bytes.length >= UTF8_BOM.length && Arrays.equals(bytes, 0, UTF8_BOM.length, UTF8_BOM, 0, UTF8_BOM.length);
-        return read(bom ? Arrays.copyOfRange(bytes, UTF8_BOM.length, bytes.length) : bytes);
+        return orThrow(tryReadFile(path));
     }
 
     /**
@@ -175,7 +214,7 @@ public final class ManifestJson {
         writer.member("contributes").startObject();
         writer.member("pipeline").objects(contributions.pipeline(), (w, contribution) -> {
             w.member("middleware").string(contribution.middleware());
-            w.member("stage").string(contribution.stage().manifestName());
+            w.member("stage").string(contribution.stage().wireName());
             w.member("before").strings(contribution.before());
             w.member("after").strings(contribution.after());
         });
@@ -271,8 +310,19 @@ public final class ManifestJson {
         return values;
     }
 
-    private static FrameworkException failure(String key, Map<String, ?> arguments) {
-        return new FrameworkException(Error.of(INVALID_MANIFEST, key, arguments));
+    private static Result<Manifest> failure(String key, Map<String, ?> arguments) {
+        return Result.fail(Error.of(INVALID_MANIFEST, key, arguments));
+    }
+
+    /**
+     * 取出清单，失败时以带消息键与参数的错误抛出：{@link Result#orElseThrow()} 抛出的异常只留错误码与说明，
+     * 这里要让 {@link FrameworkException#toError()} 原样拿回键与参数。
+     */
+    private static Manifest orThrow(Result<Manifest> result) {
+        if (result.isFailed()) {
+            throw new FrameworkException(result.error().orElseThrow());
+        }
+        return result.value().orElseThrow();
     }
 
     /**

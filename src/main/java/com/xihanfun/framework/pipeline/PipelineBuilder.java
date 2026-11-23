@@ -188,7 +188,7 @@ public final class PipelineBuilder {
     public String dump() {
         StringBuilder builder = new StringBuilder();
         for (MiddlewareDescriptor descriptor : describe()) {
-            String stage = descriptor.stage().manifestName();
+            String stage = descriptor.stage().wireName();
             builder.append(stage).append(" ".repeat(Math.max(0, STAGE_COLUMN - stage.length()))).append(' ').append(descriptor.display()).append('\n');
         }
         return builder.toString();
@@ -311,8 +311,8 @@ public final class PipelineBuilder {
                     + target + "'.");
         }
         if (other.descriptor().stage() != stage) {
-            throw registrationError("Middleware '" + source.descriptor().display() + "' (stage '" + stage.manifestName() + "') and '" + target
-                    + "' (stage '" + other.descriptor().stage().manifestName() + "') are not in the same stage, so no relative order can be declared between them.");
+            throw registrationError("Middleware '" + source.descriptor().display() + "' (stage '" + stage.wireName() + "') and '" + target
+                    + "' (stage '" + other.descriptor().stage().wireName() + "') are not in the same stage, so no relative order can be declared between them.");
         }
         return other;
     }
@@ -361,7 +361,7 @@ public final class PipelineBuilder {
             }
             if (picked < 0) {
                 String stuck = remaining.stream().map(registration -> "'" + registration.descriptor().display() + "'").collect(Collectors.joining(", "));
-                throw new FrameworkException(PipelineErrors.CYCLE, "Middleware ordering constraints in stage '" + stage.manifestName() + "' form a cycle: "
+                throw new FrameworkException(PipelineErrors.CYCLE, "Middleware ordering constraints in stage '" + stage.wireName() + "' form a cycle: "
                         + stuck + ".");
             }
             Registration node = remaining.remove(picked);

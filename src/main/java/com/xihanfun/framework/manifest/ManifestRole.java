@@ -1,5 +1,6 @@
 package com.xihanfun.framework.manifest;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.Optional;
 
 /**
@@ -25,12 +26,7 @@ public enum ManifestRole {
      * @return 角色；名字未知时为空
      */
     public static Optional<ManifestRole> parse(String name) {
-        for (ManifestRole role : values()) {
-            if (role.wireName.equals(name)) {
-                return Optional.of(role);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), ManifestRole::wireName, name);
     }
 
     /**

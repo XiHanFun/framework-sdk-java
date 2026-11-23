@@ -1,5 +1,6 @@
 package com.xihanfun.framework.primitives;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -10,7 +11,7 @@ import java.util.Set;
 /**
  * 九态生命周期（RFC-0001）。
  *
- * <p>{@link #number()} 与 .NET 枚举和插件协议的 {@code LifecycleState} 一致；{@link #stateName()} 是向量与线上编码用的名字。
+ * <p>{@link #number()} 与 .NET 枚举和插件协议的 {@code LifecycleState} 一致；{@link #wireName()} 是向量与线上编码用的名字。
  * 合法迁移表是规范性内容，完整列表在 {@code spec/conformance/vectors/primitives/lifecycle-transitions.json}。
  */
 public enum LifecycleState {
@@ -56,10 +57,10 @@ public enum LifecycleState {
     }
 
     /** 向量与线上编码用的名字。 */
-    private final String stateName;
+    private final String wireName;
 
-    LifecycleState(String stateName) {
-        this.stateName = stateName;
+    LifecycleState(String wireName) {
+        this.wireName = wireName;
     }
 
     /**
@@ -69,12 +70,7 @@ public enum LifecycleState {
      * @return 状态；名字未知时为空
      */
     public static Optional<LifecycleState> parse(String name) {
-        for (LifecycleState state : values()) {
-            if (state.stateName.equals(name)) {
-                return Optional.of(state);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), LifecycleState::wireName, name);
     }
 
     /**
@@ -89,12 +85,23 @@ public enum LifecycleState {
     }
 
     /**
-     * 返回向量与线上编码用的名字。
+     * 返回向量与线上编码用的名字；与其他枚举的取名方法同名。
      *
      * @return 名字，如 {@code Ready}
      */
+    public String wireName() {
+        return wireName;
+    }
+
+    /**
+     * 返回向量与线上编码用的名字。
+     *
+     * @return 名字，如 {@code Ready}
+     * @deprecated 用 {@link #wireName()}：各枚举的取名方法统一叫这个名字，返回值相同。
+     */
+    @Deprecated
     public String stateName() {
-        return stateName;
+        return wireName;
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.xihanfun.framework.manifest;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.Optional;
 
 /**
@@ -31,12 +32,7 @@ public enum ManifestKind {
      * @return 种类；名字未知时为空
      */
     public static Optional<ManifestKind> parse(String name) {
-        for (ManifestKind kind : values()) {
-            if (kind.wireName.equals(name)) {
-                return Optional.of(kind);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), ManifestKind::wireName, name);
     }
 
     /**

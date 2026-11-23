@@ -15,7 +15,7 @@
 | `Wire` | 协议消息与 SDK 类型的转换：错误按 RFC-0001 编码、上下文按 RFC-0003 平铺 | `invocation.md` §2、§3 |
 | `PluginConfiguration`、`ConfigurationNames`、`ConfigurationScalars` | 配置节：先过共同的 JSON 文本检查，成员名按 ASCII 不区分大小写，字符串叶子按 JSON 数字与布尔的文法 | `lifecycle.md` §7.2 |
 | `PluginLogger` | stderr 一行一个 JSON 对象；`java.util.logging` 的根日志也改写成这种行 | `invocation.md` §6 |
-| `PluginErrors`、`PluginMessages` | 运行时的错误码与七个消息键 | RFC-0017「错误码」、`invocation.md` §8 |
+| `PluginErrors`、`PluginMessages` | 运行时的错误码、「回调被拒」的工厂方法 `callbackDenied`（本地核对与 gRPC 状态映射共用）与七个消息键；带插件 ID 的其余错误经 `Wire` 创建 | RFC-0017「错误码」、`invocation.md` §8 |
 
 ## 平台差异
 

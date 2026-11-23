@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.Vectors;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -85,7 +86,7 @@ class PrimitivesTest {
         for (LifecycleState from : LifecycleState.values()) {
             for (LifecycleState to : LifecycleState.values()) {
                 if (from.canTransitionTo(to)) {
-                    assertTrue(allowed.contains(List.of(from.stateName(), to.stateName())),
+                    assertTrue(allowed.contains(List.of(from.wireName(), to.wireName())),
                             from + " -> " + to + " is allowed by the SDK but absent from the vector");
                 }
             }
@@ -108,10 +109,44 @@ class PrimitivesTest {
         List<PipelineStage> stages = PipelineStage.all();
         assertEquals(names.size(), stages.size());
         for (int index = 0; index < names.size(); index++) {
-            assertEquals(names.get(index), stages.get(index).manifestName());
+            assertEquals(names.get(index), stages.get(index).wireName());
             assertEquals(Optional.of(stages.get(index)), PipelineStage.parse(names.get(index)));
         }
         assertEquals(Optional.empty(), PipelineStage.parse("Handle"), "stage names are lowercase");
+    }
+
+    @Test
+    void enumsParseExactlyTheirWireNames() {
+        // 各枚举的 parse 共用一个查找：整串相等、区分大小写，null 与未知的名字为空；取名方法统一叫 wireName()
+        for (Stability stability : Stability.values()) {
+            assertEquals(Optional.of(stability), Stability.parse(stability.wireName()));
+        }
+        for (PipelineStage stage : PipelineStage.values()) {
+            assertEquals(Optional.of(stage), PipelineStage.parse(stage.wireName()));
+        }
+        for (LifecycleState state : LifecycleState.values()) {
+            assertEquals(Optional.of(state), LifecycleState.parse(state.wireName()));
+        }
+        assertEquals("experimental", Stability.EXPERIMENTAL.wireName());
+        assertEquals("observe", PipelineStage.OBSERVE.wireName());
+        assertEquals("Ready", LifecycleState.READY.wireName());
+        for (String unknown : java.util.Arrays.asList(null, "", "Stable", "stable ", " stable", "STABLE", "stable\n")) {
+            assertEquals(Optional.empty(), Stability.parse(unknown), "'" + unknown + "' is not a stability");
+        }
+        assertEquals(Optional.empty(), PipelineStage.parse(null));
+        assertEquals(Optional.empty(), LifecycleState.parse(null));
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void theDeprecatedNameAccessorsReturnTheWireNames() {
+        // manifestName() 与 stateName() 是保留的旧名
+        for (PipelineStage stage : PipelineStage.values()) {
+            assertEquals(stage.wireName(), stage.manifestName());
+        }
+        for (LifecycleState state : LifecycleState.values()) {
+            assertEquals(state.wireName(), state.stateName());
+        }
     }
 
     @Test

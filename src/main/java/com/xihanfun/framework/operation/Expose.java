@@ -1,5 +1,6 @@
 package com.xihanfun.framework.operation;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.Optional;
 
 /**
@@ -31,12 +32,7 @@ public enum Expose {
      * @return 协议；名字未知时为空
      */
     public static Optional<Expose> parse(String name) {
-        for (Expose expose : values()) {
-            if (expose.wireName.equals(name)) {
-                return Optional.of(expose);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), Expose::wireName, name);
     }
 
     /**

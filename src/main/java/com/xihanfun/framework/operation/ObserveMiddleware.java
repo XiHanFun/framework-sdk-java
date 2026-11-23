@@ -43,7 +43,7 @@ final class ObserveMiddleware implements Middleware {
                 // 吞掉中断异常要恢复中断标志，调用线程之后的等待仍能看到中断
                 Thread.currentThread().interrupt();
             }
-            Optional<Error> cancellation = context.cancellation();
+            Optional<Error> cancellation = context.cancellationError();
             if (cancellation.isPresent()) {
                 return cancellation.get();
             }

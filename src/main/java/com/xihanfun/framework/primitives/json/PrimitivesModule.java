@@ -53,9 +53,9 @@ public final class PrimitivesModule extends SimpleModule {
         addDeserializer(Unit.class, new UnitCodec.Deserializer());
         addSerializer(Stability.class, new NameCodec.Serializer<>(Stability.class, Stability::wireName));
         addDeserializer(Stability.class, new NameCodec.Deserializer<>(Stability.class, "stability", Stability::parse));
-        addSerializer(PipelineStage.class, new NameCodec.Serializer<>(PipelineStage.class, PipelineStage::manifestName));
+        addSerializer(PipelineStage.class, new NameCodec.Serializer<>(PipelineStage.class, PipelineStage::wireName));
         addDeserializer(PipelineStage.class, new NameCodec.Deserializer<>(PipelineStage.class, "pipeline stage", PipelineStage::parse));
-        addSerializer(LifecycleState.class, new NameCodec.Serializer<>(LifecycleState.class, LifecycleState::stateName));
+        addSerializer(LifecycleState.class, new NameCodec.Serializer<>(LifecycleState.class, LifecycleState::wireName));
         addDeserializer(LifecycleState.class, new NameCodec.Deserializer<>(LifecycleState.class, "lifecycle state", LifecycleState::parse));
     }
 }

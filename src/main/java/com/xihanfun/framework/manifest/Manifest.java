@@ -3,7 +3,10 @@ package com.xihanfun.framework.manifest;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.ErrorCode;
 import com.xihanfun.framework.primitives.FrameworkException;
+import com.xihanfun.framework.primitives.KernelMessages;
+import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Stability;
+import com.xihanfun.framework.primitives.Unit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -36,13 +39,6 @@ public final class Manifest {
 
     /** 插件权限文法。 */
     private static final Pattern PERMISSION = Pattern.compile("^(net\\.outbound|fs\\.read|fs\\.write|capability):.+$");
-
-    /** 跨字段约束的消息键（与 .NET 的 {@code ManifestMessages} 相同），参数只有 {@code id}。 */
-    static final String ISOLATION_REQUIRED = "primitives.manifest.isolation_required";
-    static final String ISOLATION_NOT_ALLOWED = "primitives.manifest.isolation_not_allowed";
-    static final String DUPLICATE_PROVIDES = "primitives.manifest.duplicate_provides";
-    static final String DUPLICATE_REQUIRES = "primitives.manifest.duplicate_requires";
-    static final String DUPLICATE_BINDINGS = "primitives.manifest.duplicate_bindings";
 
     /** 版本是否是语义化版本。 */
     static boolean isValidVersion(String version) {
@@ -581,7 +577,24 @@ public final class Manifest {
         }
 
         /**
-         * 校验格式与跨字段约束并构建清单。
+         * 核对字段之间的约束（RFC-0002 解析规则 2 第 4 步，.NET 的 {@code Manifest.Validate}），失败以结果返回，按这个顺序报第一处：
+         * 插件没有隔离级别为 {@code primitives.manifest.isolation_required}；非插件写了隔离级别或权限为 {@code isolation_not_allowed}；
+         * 提供的能力 ID 重复为 {@code duplicate_provides}；依赖的能力 ID 重复为 {@code duplicate_requires}；绑定的名字重复为
+         * {@code duplicate_bindings}。
+         *
+         * <p>单个字段自己的格式（ID、版本、原语层大版本、稳定性与种类必填、激活事件与权限的文法）不是可恢复的失败：与 .NET 在赋值时
+         * 拒绝一样是配置或编程错误，在这里照常抛出，不进结果。
+         *
+         * @return 成功；违反约束时为 {@code PRIMITIVES_VALIDATION_001}，带上面的消息键与参数 {@code id}（清单 ID）
+         * @throws FrameworkException 字段缺失或不合法（{@code PRIMITIVES_VALIDATION_001}）
+         */
+        public Result<Unit> validate() {
+            requireFields();
+            return crossFieldProblem().<Result<Unit>>map(Result::fail).orElseGet(Result::success);
+        }
+
+        /**
+         * 校验格式与跨字段约束并构建清单；跨字段约束即 {@link #validate()}，失败时把它的错误抛出。
          *
          * @return 清单
          * @throws FrameworkException 字段缺失或不合法（{@code PRIMITIVES_VALIDATION_001}）；违反跨字段约束时同一个错误码，
@@ -589,11 +602,25 @@ public final class Manifest {
          *     {@code duplicate_provides} → {@code duplicate_requires} → {@code duplicate_bindings} 的顺序报第一个
          */
         public Manifest build() {
-            validate();
-            return new Manifest(this);
+            Result<Manifest> built = tryBuild();
+            if (built.isFailed()) {
+                // 以带消息键与参数的错误抛出：码、键与参数原样留在 toError() 里
+                throw new FrameworkException(built.error().orElseThrow());
+            }
+            return built.value().orElseThrow();
         }
 
-        private void validate() {
+        /**
+         * 校验并构建清单，跨字段约束的失败以结果返回；{@link ManifestJson} 的读取经它把错误码换成清单读取失败。
+         */
+        Result<Manifest> tryBuild() {
+            return validate().map(valid -> new Manifest(this));
+        }
+
+        /**
+         * 单个字段的格式：不合法即抛出，消息是面向开发者的英文，没有消息键。
+         */
+        private void requireFields() {
             if (!ManifestId.isValid(id)) {
                 throw invalid("The manifest ID '" + id + "' must match xihan.<domain>.<name>.");
             }
@@ -622,22 +649,29 @@ public final class Manifest {
                     throw invalid("The permission '" + permission + "' of '" + id + "' is not valid.");
                 }
             }
-            // 跨字段约束按 .NET 的 Manifest.Validate 的顺序，消息键与参数相同（RFC-0002 解析规则 2 第 4 步，ADR-0236）
+        }
+
+        /**
+         * 跨字段约束的第一处问题：按 .NET 的 Manifest.Validate 的顺序，消息键与参数相同（RFC-0002 解析规则 2 第 4 步，ADR-0236）；
+         * 字段的格式已经由 requireFields 核对过。
+         */
+        private Optional<Error> crossFieldProblem() {
             if (kind == ManifestKind.PLUGIN && isolation == null) {
-                throw crossField(ISOLATION_REQUIRED);
+                return Optional.of(crossField(KernelMessages.MANIFEST_ISOLATION_REQUIRED));
             }
             if (kind != ManifestKind.PLUGIN && (isolation != null || !permissions.isEmpty())) {
-                throw crossField(ISOLATION_NOT_ALLOWED);
+                return Optional.of(crossField(KernelMessages.MANIFEST_ISOLATION_NOT_ALLOWED));
             }
             if (hasDuplicates(provides.stream().map(CapabilityDeclaration::id).toList())) {
-                throw crossField(DUPLICATE_PROVIDES);
+                return Optional.of(crossField(KernelMessages.MANIFEST_DUPLICATE_PROVIDES));
             }
             if (hasDuplicates(requires.stream().map(CapabilityRequirement::id).toList())) {
-                throw crossField(DUPLICATE_REQUIRES);
+                return Optional.of(crossField(KernelMessages.MANIFEST_DUPLICATE_REQUIRES));
             }
             if (hasDuplicates(bindings.stream().map(Binding::name).toList())) {
-                throw crossField(DUPLICATE_BINDINGS);
+                return Optional.of(crossField(KernelMessages.MANIFEST_DUPLICATE_BINDINGS));
             }
+            return Optional.empty();
         }
 
         private static boolean hasDuplicates(List<String> values) {
@@ -649,8 +683,8 @@ public final class Manifest {
             return new FrameworkException(ErrorCode.INVALID_ARGUMENT, message);
         }
 
-        private FrameworkException crossField(String key) {
-            return new FrameworkException(Error.validation(ErrorCode.INVALID_ARGUMENT, key, Map.of("id", id)));
+        private Error crossField(String key) {
+            return Error.validation(ErrorCode.INVALID_ARGUMENT, key, Map.of("id", id));
         }
     }
 }

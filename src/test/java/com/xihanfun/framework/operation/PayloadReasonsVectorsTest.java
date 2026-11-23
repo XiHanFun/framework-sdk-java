@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.Result;

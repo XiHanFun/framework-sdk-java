@@ -3,6 +3,7 @@ package com.xihanfun.framework.primitives;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.Vectors;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;

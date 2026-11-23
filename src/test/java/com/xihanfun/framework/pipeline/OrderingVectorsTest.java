@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.Result;

@@ -7,14 +7,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.Vectors;
+import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.ErrorCode;
 import com.xihanfun.framework.primitives.FrameworkException;
+import com.xihanfun.framework.primitives.KernelMessages;
 import com.xihanfun.framework.primitives.PipelineStage;
+import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Stability;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -337,6 +342,125 @@ class ManifestTest {
             assertEquals(Optional.of(ManifestJson.FILE_MISSING), rejected.toError().messageKey());
             assertEquals(Map.of("path", missing.toString()), rejected.toError().details());
         }
+    }
+
+    @Test
+    void tryReadReturnsFailuresAsResults(@TempDir Path directory) throws IOException {
+        // 读取的失败是可恢复的失败（.NET 的 ManifestReader.Read / ReadFile 返回 Result<Manifest>）；read / readFile 是抛异常的包装
+        Result<Manifest> read = ManifestJson.tryRead(ECHO_MANIFEST);
+        assertEquals(ManifestJson.read(ECHO_MANIFEST), read.value().orElseThrow());
+        assertEquals(read, ManifestJson.tryRead(ECHO_MANIFEST.getBytes(StandardCharsets.UTF_8)));
+
+        String minimal = "{\"id\":\"xihan.a.b\",\"version\":\"1.0.0\",\"primitives\":\"1\",\"stability\":\"stable\",\"kind\":";
+        String notJson = "The manifest is not valid JSON: $";
+        assertFailure(ManifestJson.tryRead("{"), ManifestJson.INVALID_JSON, Map.of("reason", "$"), notJson);
+        // 孤立的代理项编不成 UTF-8，按不是 JSON 处理
+        assertFailure(ManifestJson.tryRead("\"\uD800\""), ManifestJson.INVALID_JSON, Map.of("reason", "$"), notJson);
+        assertFailure(ManifestJson.tryRead("null"), ManifestJson.EMPTY, Map.of(), "The manifest is empty.");
+        assertFailure(ManifestJson.tryRead(minimal + "\"capability\",\"extra\":1}"), ManifestJson.INVALID, Map.of("reason", "$.extra"),
+                "The manifest is not valid: $.extra");
+        // 跨字段约束：保留 primitives.manifest.* 的键与参数，错误码换成清单读取失败
+        assertFailure(ManifestJson.tryRead(minimal + "\"plugin\"}"), KernelMessages.MANIFEST_ISOLATION_REQUIRED, Map.of("id", "xihan.a.b"),
+                "Plugin manifest 'xihan.a.b' must declare 'isolation'.");
+
+        Path file = directory.resolve(Manifest.FILE_NAME);
+        Files.writeString(file, ECHO_MANIFEST);
+        assertEquals("xihan.samples.echo", ManifestJson.tryReadFile(file).value().orElseThrow().id());
+        Path missing = directory.resolve("missing.json");
+        assertFailure(ManifestJson.tryReadFile(missing), ManifestJson.FILE_MISSING, Map.of("path", missing.toString()),
+                "Manifest file '" + missing + "' does not exist.");
+    }
+
+    @Test
+    void validateReturnsCrossFieldProblemsAsResults() {
+        // .NET 的 Manifest.Validate：字段之间的约束以结果返回，按固定的顺序报第一处；build() 把同一个错误抛出
+        Map<String, Manifest.Builder> cases = new LinkedHashMap<>();
+        cases.put(KernelMessages.MANIFEST_ISOLATION_REQUIRED, minimal().kind(ManifestKind.PLUGIN));
+        cases.put(KernelMessages.MANIFEST_ISOLATION_NOT_ALLOWED, minimal().kind(ManifestKind.CAPABILITY).isolation(PluginIsolation.WASM));
+        cases.put(KernelMessages.MANIFEST_DUPLICATE_PROVIDES, minimal().kind(ManifestKind.CAPABILITY)
+                .provides(List.of(CapabilityDeclaration.of("a.b", 1), CapabilityDeclaration.of("a.b", 2))));
+        cases.put(KernelMessages.MANIFEST_DUPLICATE_REQUIRES, minimal().kind(ManifestKind.CAPABILITY)
+                .requires(List.of(CapabilityRequirement.of("a.b", 1), CapabilityRequirement.of("a.b", 1).withOptional(true))));
+        cases.put(KernelMessages.MANIFEST_DUPLICATE_BINDINGS, minimal().kind(ManifestKind.CAPABILITY)
+                .bindings(List.of(Binding.of("db", "connection:relational"), Binding.of("db", "cache:distributed"))));
+        cases.forEach((key, builder) -> {
+            Error error = builder.validate().error().orElseThrow(() -> new AssertionError(key + " must be reported"));
+            assertEquals(ErrorCode.INVALID_ARGUMENT, error.code(), key);
+            assertEquals(Optional.of(key), error.messageKey());
+            assertEquals(Map.of("id", "xihan.a.b"), error.details(), key);
+            FrameworkException thrown = assertThrows(FrameworkException.class, builder::build, key);
+            assertEquals(error, thrown.toError(), key + ": build() throws the same error");
+        });
+        // 同时违反几条时只报顺序在前的那一条
+        Manifest.Builder several = minimal().kind(ManifestKind.PLUGIN)
+                .provides(List.of(CapabilityDeclaration.of("a.b", 1), CapabilityDeclaration.of("a.b", 2)));
+        assertEquals(Optional.of(KernelMessages.MANIFEST_ISOLATION_REQUIRED), several.validate().error().orElseThrow().messageKey());
+        assertEquals(Result.success(), minimal().kind(ManifestKind.CAPABILITY).validate());
+
+        // 单个字段的格式不是可恢复的失败：配置或编程错误，validate() 与 build() 一样抛出，没有消息键
+        Manifest.Builder withoutId = Manifest.builder().version("1.0.0").primitives(1);
+        FrameworkException missingId = assertThrows(FrameworkException.class, withoutId::validate);
+        assertEquals(ErrorCode.INVALID_ARGUMENT, missingId.code());
+        assertEquals(Optional.empty(), missingId.toError().messageKey());
+    }
+
+    @Test
+    void messageKeysAreTheSharedKernelKeys() {
+        // 键的文本只在 KernelMessages 写一遍，ManifestJson 的常量引用它
+        assertEquals(KernelMessages.MANIFEST_INVALID_JSON, ManifestJson.INVALID_JSON);
+        assertEquals(KernelMessages.MANIFEST_EMPTY, ManifestJson.EMPTY);
+        assertEquals(KernelMessages.MANIFEST_INVALID, ManifestJson.INVALID);
+        assertEquals(KernelMessages.MANIFEST_FILE_MISSING, ManifestJson.FILE_MISSING);
+    }
+
+    @Test
+    void idGrammarsAreSharedByDeclarationsAndRequirements() {
+        // 能力 ID 的文法只有一份：声明与依赖的文本各自多出来的部分之外，接受的 ID 与 CapabilityId 相同
+        for (String id : List.of("caching.distributed", "a1.b-2", "kernel.hosting")) {
+            assertTrue(CapabilityId.isValid(id), id);
+            assertTrue(CapabilityDeclaration.tryParse(id + "@1").isPresent(), id);
+            assertTrue(CapabilityRequirement.tryParse(id + "@^1?").isPresent(), id);
+        }
+        List<String> invalid = List.of("caching", "Caching.distributed", "caching.Distributed", "caching..x", "1a.b", "a-b.c", "a.b.c",
+                "a.b\n");
+        for (String id : invalid) {
+            assertFalse(CapabilityId.isValid(id), id);
+            assertEquals(Optional.empty(), CapabilityDeclaration.tryParse(id + "@1"), id);
+            assertEquals(Optional.empty(), CapabilityRequirement.tryParse(id + "@1"), id);
+        }
+    }
+
+    @Test
+    void enumsParseExactlyTheirWireNames() {
+        // 各枚举的 parse 共用一个查找：整串相等、区分大小写，null 与未知的名字为空
+        for (ManifestKind kind : ManifestKind.values()) {
+            assertEquals(Optional.of(kind), ManifestKind.parse(kind.wireName()));
+        }
+        for (ManifestRole role : ManifestRole.values()) {
+            assertEquals(Optional.of(role), ManifestRole.parse(role.wireName()));
+        }
+        for (PluginIsolation isolation : PluginIsolation.values()) {
+            assertEquals(Optional.of(isolation), PluginIsolation.parse(isolation.wireName()));
+        }
+        assertEquals("out-of-process", PluginIsolation.OUT_OF_PROCESS.wireName());
+        for (String unknown : java.util.Arrays.asList(null, "", "Plugin", "plugin ", "PLUGIN")) {
+            assertEquals(Optional.empty(), ManifestKind.parse(unknown), "'" + unknown + "' is not a kind");
+            assertEquals(Optional.empty(), ManifestRole.parse(unknown));
+            assertEquals(Optional.empty(), PluginIsolation.parse(unknown));
+        }
+    }
+
+    /** 只差种类的最小清单。 */
+    private static Manifest.Builder minimal() {
+        return Manifest.builder().id("xihan.a.b").version("1.0.0").primitives(1).stability(Stability.STABLE);
+    }
+
+    private static void assertFailure(Result<Manifest> result, String key, Map<String, Object> arguments, String message) {
+        Error error = result.error().orElseThrow(() -> new AssertionError(key + " must be reported"));
+        assertEquals(ManifestJson.INVALID_MANIFEST, error.code(), key);
+        assertEquals(Optional.of(key), error.messageKey());
+        assertEquals(arguments, error.details(), key);
+        assertEquals(message, error.message(), key);
     }
 
     private static void assertRejected(String json, String name) {

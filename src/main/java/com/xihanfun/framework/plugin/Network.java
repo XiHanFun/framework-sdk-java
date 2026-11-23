@@ -1,5 +1,6 @@
 package com.xihanfun.framework.plugin;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.Optional;
 
 /**
@@ -30,12 +31,7 @@ public enum Network {
      * @return 网络类型；名字未知时为空
      */
     public static Optional<Network> parse(String name) {
-        for (Network network : values()) {
-            if (network.wireName.equals(name)) {
-                return Optional.of(network);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), Network::wireName, name);
     }
 
     /**

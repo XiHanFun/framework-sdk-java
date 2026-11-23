@@ -1,5 +1,6 @@
 package com.xihanfun.framework.plugin;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.Optional;
 
 /**
@@ -28,12 +29,7 @@ public enum SubscriptionMode {
         if (name == null || name.isEmpty()) {
             return Optional.of(COMPETING);
         }
-        for (SubscriptionMode mode : values()) {
-            if (mode.wireName.equals(name)) {
-                return Optional.of(mode);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), SubscriptionMode::wireName, name);
     }
 
     /**

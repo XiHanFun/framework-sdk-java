@@ -4,9 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.Vectors;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -39,6 +44,23 @@ class KernelMessagesVectorsTest {
             assertEquals(MessageTemplate.format(template, arguments), Error.of(code, key, arguments).message(), key + " message");
         }
         assertEquals("PRIMITIVES_VALIDATION_002", ErrorCode.UNINITIALIZED_RESULT);
+    }
+
+    @Test
+    void everySharedKeyHasExactlyOneConstant() throws Exception {
+        // 键的文本只在 KernelMessages 写一遍：它的公开字符串常量（LOCALE 除外）正好是向量里的全部键，各包的消息键常量引用它们
+        Set<String> keys = new TreeSet<>();
+        for (JsonNode message : Vectors.read("primitives/kernel-messages.json").get("messages")) {
+            keys.add(message.get("key").textValue());
+        }
+        Set<String> constants = new TreeSet<>();
+        for (Field field : KernelMessages.class.getFields()) {
+            if (Modifier.isStatic(field.getModifiers()) && field.getType() == String.class && !field.getName().equals("LOCALE")) {
+                assertTrue(constants.add((String) field.get(null)), field.getName() + " repeats a key");
+            }
+        }
+        assertEquals(keys, constants, "one constant for each shared key");
+        assertEquals(keys, new TreeSet<>(KernelMessages.templates().keySet()));
     }
 
     @Test

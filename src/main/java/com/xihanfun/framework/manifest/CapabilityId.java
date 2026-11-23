@@ -7,8 +7,13 @@ import java.util.regex.Pattern;
  * 能力 ID 的文法：{@code <领域>.<能力>}（{@code spec/conventions/capability-ids.md}）。
  */
 public final class CapabilityId {
-    /** 能力 ID 文法。 */
-    private static final Pattern PATTERN = Pattern.compile("^[a-z][a-z0-9]*\\.[a-z][a-z0-9-]*$");
+    /**
+     * 能力 ID 文法，不带首尾的锚：声明 {@code id@version} 与依赖 {@code id@[^]version[?]} 的文法由它拼出，只此一处。
+     */
+    static final String GRAMMAR = "[a-z][a-z0-9]*\\.[a-z][a-z0-9-]*";
+
+    /** 整串是能力 ID。 */
+    private static final Pattern PATTERN = Pattern.compile("^" + GRAMMAR + "$");
 
     private CapabilityId() {
     }

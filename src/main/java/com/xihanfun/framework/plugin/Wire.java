@@ -201,7 +201,7 @@ final class Wire {
 
     /** {@code PLUGINS_UNAVAILABLE_001} + {@value PluginMessages#UNAVAILABLE}：不在可服务状态（{@code lifecycle.md} §7.3）。 */
     Error unavailable(LifecycleState state) {
-        return Error.unavailable(PluginErrors.UNAVAILABLE, PluginMessages.UNAVAILABLE, Map.of("id", pluginId, "state", state.stateName()));
+        return Error.unavailable(PluginErrors.UNAVAILABLE, PluginMessages.UNAVAILABLE, Map.of("id", pluginId, "state", state.wireName()));
     }
 
     /** {@code PLUGINS_UNEXPECTED_001} + {@value PluginMessages#FAILED}；{@code phase} 一律小写或操作 ID（{@code invocation.md} §8）。 */

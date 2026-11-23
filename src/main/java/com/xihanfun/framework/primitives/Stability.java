@@ -1,5 +1,6 @@
 package com.xihanfun.framework.primitives;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.Optional;
 
 /**
@@ -31,12 +32,7 @@ public enum Stability {
      * @return 稳定性；名字未知时为空
      */
     public static Optional<Stability> parse(String name) {
-        for (Stability stability : values()) {
-            if (stability.wireName.equals(name)) {
-                return Optional.of(stability);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), Stability::wireName, name);
     }
 
     /**

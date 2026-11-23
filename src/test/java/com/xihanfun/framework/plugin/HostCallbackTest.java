@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.protobuf.ByteString;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.invocation.CancellableContext;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.invocation.DeadlineSignals;
 import com.xihanfun.framework.operation.OperationContract;
+import com.xihanfun.framework.operation.OperationErrors;
 import com.xihanfun.framework.operation.OperationRegistry;
 import com.xihanfun.framework.operation.OperationResponse;
 import com.xihanfun.framework.plugin.v1.HostGrpc;
@@ -41,6 +43,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -312,7 +315,7 @@ class HostCallbackTest {
         try {
             ungranted.handshake();
             assertTrue(ungranted.stub().configure(PluginProto.ConfigureRequest.newBuilder().setConfiguration("{}")
-                    .addGrantedPermissions(Host.PUBLISH_PERMISSION).build()).getStatus().getOk());
+                    .addGrantedPermissions(Host.PERMISSION_PUBLISH).build()).getStatus().getOk());
             assertTrue(ungranted.stub().start(PluginProto.StartRequest.getDefaultInstance()).getStatus().getOk());
             assertEquals(new Outcome(false, PluginErrors.CALLBACK_DENIED, PluginMessages.CALLBACK_DENIED,
                     "{\"id\":\"xihan.tests.sample\",\"permission\":\"capability:kernel.pipeline\"}", ""), relay(ungranted, "orders.create"));
@@ -493,6 +496,41 @@ class HostCallbackTest {
             assertEquals("", Wire.error(error).getText(), "the mapped errors carry message keys");
         }
         assertEquals("17", Host.statusName(17), "codes outside 0-16 are written as numbers");
+    }
+
+    @Test
+    void deniedAndUnknownCallbacksNameThePermissionAndTheOperation() {
+        // 「回调被拒」与「操作未登记」各只拼一次（PluginErrors.callbackDenied、OperationErrors.notFound）：发出之前的本地核对与宿主的
+        // gRPC 状态给出同一个错误，渲染出的文案带插件 ID、权限与操作 ID
+        Wire wire = new Wire("xihan.tests.sample");
+        Error denied = PluginErrors.callbackDenied("xihan.tests.sample", Host.PERMISSION_INVOKE);
+        assertEquals(PluginErrors.CALLBACK_DENIED, denied.code());
+        assertEquals(Optional.of(PluginMessages.CALLBACK_DENIED), denied.messageKey());
+        assertEquals(Map.of("id", "xihan.tests.sample", "permission", "capability:kernel.pipeline"), denied.details());
+        assertEquals(Optional.of("Plugin 'xihan.tests.sample' may not use permission 'capability:kernel.pipeline': "
+                + "it must be declared in the manifest and granted by the host."),
+                PluginMessages.catalog().messages().resolve(PluginMessages.CALLBACK_DENIED, "en-US", denied.details()));
+        int permissionDenied = Status.Code.PERMISSION_DENIED.value();
+        assertEquals(denied, Host.mapStatus(wire, Host.RPC_INVOKE, permissionDenied, "denied", false, "orders.create"));
+        assertEquals(PluginErrors.callbackDenied("xihan.tests.sample", Host.PERMISSION_PUBLISH),
+                Host.mapStatus(wire, Host.RPC_PUBLISH, permissionDenied, "denied", false, "orders.create"));
+
+        Error unknown = Host.mapStatus(wire, Host.RPC_INVOKE, Status.Code.UNIMPLEMENTED.value(), "", false, "orders.missing");
+        assertEquals(OperationErrors.notFound("orders.missing"), unknown);
+        assertEquals("Operation 'orders.missing' is not registered.", unknown.message());
+        Error invalid = Host.mapStatus(wire, Host.RPC_INVOKE, Status.Code.INVALID_ARGUMENT.value(), "$.quantity", false, "orders.create");
+        assertEquals(OperationErrors.invalidPayload("orders.create", "$.quantity"), invalid);
+        assertEquals("The payload of operation 'orders.create' is not valid: $.quantity", invalid.message());
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void theDeprecatedPermissionNamesAreAliases() {
+        // PERMISSION_INVOKE / PERMISSION_PUBLISH 与其他语言的 SDK 同名；INVOKE_PERMISSION / PUBLISH_PERMISSION 是保留的旧名
+        assertEquals("capability:kernel.pipeline", Host.PERMISSION_INVOKE);
+        assertEquals("capability:messaging.queue", Host.PERMISSION_PUBLISH);
+        assertEquals(Host.PERMISSION_INVOKE, Host.INVOKE_PERMISSION);
+        assertEquals(Host.PERMISSION_PUBLISH, Host.PUBLISH_PERMISSION);
     }
 
     @Test

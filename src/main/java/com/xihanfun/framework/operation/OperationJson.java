@@ -17,7 +17,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import com.xihanfun.framework.invocation.InvocationErrors;
-import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.JsonText;
 import com.xihanfun.framework.primitives.Result;
@@ -25,7 +24,6 @@ import com.xihanfun.framework.primitives.json.PrimitivesModule;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -87,27 +85,27 @@ public final class OperationJson {
         byte[] text = payload.length == 0 ? EMPTY_OBJECT : payload;
         Optional<JsonText.Problem> problem = JsonText.check(text);
         if (problem.isPresent()) {
-            return Result.fail(invalidPayload(id, problem.get().path()));
+            return Result.fail(OperationErrors.invalidPayload(id, problem.get().path()));
         }
         JsonNode tree = readTree(text);
         if (tree.isNull()) {
-            return Result.fail(invalidPayload(id, JsonText.ROOT));
+            return Result.fail(OperationErrors.invalidPayload(id, JsonText.ROOT));
         }
         JavaType javaType = mapper.constructType(type);
         Optional<String> path = shape.findProblem(tree, javaType);
         if (path.isPresent()) {
-            return Result.fail(invalidPayload(id, path.get()));
+            return Result.fail(OperationErrors.invalidPayload(id, path.get()));
         }
         T value;
         try {
             value = mapper.treeToValue(tree, type);
         } catch (JsonMappingException invalid) {
-            return Result.fail(invalidPayload(id, pathOf(JsonText.ROOT, invalid)));
+            return Result.fail(OperationErrors.invalidPayload(id, pathOf(JsonText.ROOT, invalid)));
         } catch (IOException | IllegalArgumentException invalid) {
-            return Result.fail(invalidPayload(id, JsonText.ROOT));
+            return Result.fail(OperationErrors.invalidPayload(id, JsonText.ROOT));
         }
         if (value == null) {
-            return Result.fail(invalidPayload(id, JsonText.ROOT));
+            return Result.fail(OperationErrors.invalidPayload(id, JsonText.ROOT));
         }
         return Result.ok(value);
     }
@@ -208,10 +206,6 @@ public final class OperationJson {
             }
         }
         return Optional.empty();
-    }
-
-    static Error invalidPayload(String id, String reason) {
-        return Error.validation(OperationErrors.INVALID_PAYLOAD, OperationMessages.INVALID_PAYLOAD, Map.of("id", id, "reason", reason));
     }
 
     /**

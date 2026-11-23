@@ -8,7 +8,7 @@ import com.xihanfun.framework.primitives.Result;
  *
  * <p>可恢复失败返回失败的 {@link Result}，不抛异常；成功值不能为 {@code null}。一个处理器实例被所有并发的调用共享，必须线程安全；
  * 同步签名，在调用线程上执行，在虚拟线程上阻塞等待 I/O 不占用平台线程。应检查 {@link Context#isCancelled()}，
- * 取消后尽早返回 {@link Context#cancellation()} 的错误。
+ * 取消后尽早返回 {@link Context#cancellationError()} 的错误。
  *
  * @param <Req> 请求类型
  * @param <Res> 响应类型

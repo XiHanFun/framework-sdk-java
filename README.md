@@ -33,7 +33,7 @@ The whole SDK is a single Maven artifact, `com.xihanfun:xihan-framework`, with t
 | `com.xihanfun.framework.primitives` | `Error`, `Result<T>`, `Maybe<T>`, `TypedId`, lifecycle states, message keys and templates | RFC-0001, RFC-0010 |
 | `com.xihanfun.framework.primitives.json` | Wire JSON encoding: the Jackson module `PrimitivesModule` | RFC-0001 |
 | `com.xihanfun.framework.manifest` | Reading, writing and validating `xihan.manifest.json` | RFC-0002 |
-| `com.xihanfun.framework.invocation` | `Context`: cancellation and deadlines, W3C tracing, registered baggage | RFC-0003 |
+| `com.xihanfun.framework.invocation` | `Context`: cancellation and deadlines, W3C tracing, registered baggage, the request-scoped item bag and values carried by derivation | RFC-0003 |
 | `com.xihanfun.framework.pipeline` | The eleven-stage `PipelineBuilder` and its ordering rules | RFC-0004 |
 | `com.xihanfun.framework.operation` | Operation contracts, `OperationRegistry` and `OperationInvoker` | RFC-0011 |
 | `com.xihanfun.framework.plugin` | The out-of-process plugin runtime `PluginRuntime.serve`, on grpc-java | RFC-0017 |

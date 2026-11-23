@@ -1,5 +1,6 @@
 package com.xihanfun.framework.manifest;
 
+import com.xihanfun.framework.internal.Grammars;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -14,21 +15,18 @@ import java.util.regex.Pattern;
  * 插件的由宿主在登记它的代理操作时一并登记（{@code plugin/invocation.md} §1）。
  */
 public final class Contributions {
-    /**
-     * 操作 ID 文法（RFC-0011、conventions/operation-ids.md）：资源与动词都是小写字母开头、连字符分隔；
-     * 与 operation 模块的 OperationId 相同（manifest 不依赖 operation，所以在这里另写一份）。
-     */
-    private static final Pattern OPERATION = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$");
-
     /** 权限码文法（RFC-0008）。 */
     private static final Pattern PERMISSION_CODE = Pattern.compile("^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$");
 
     /** 健康项名文法。 */
     private static final Pattern HEALTH = Pattern.compile("^[a-z][a-z0-9.-]*$");
 
-    /** 操作 ID 是否合文法（RFC-0011）。 */
+    /**
+     * 操作 ID 是否合文法（RFC-0011、conventions/operation-ids.md）：与 operation 包的 OperationId 用同一份文法；
+     * manifest 不依赖 operation，所以文法放在两个包都能引用的 internal 包里。
+     */
     static boolean isValidOperation(String operation) {
-        return OPERATION.matcher(operation).matches();
+        return Grammars.isOperationId(operation);
     }
 
     /** 权限码是否合文法（RFC-0008）。 */
@@ -240,7 +238,7 @@ public final class Contributions {
          */
         public Contributions build() {
             for (String operation : operations) {
-                if (!OPERATION.matcher(operation).matches()) {
+                if (!isValidOperation(operation)) {
                     throw new IllegalArgumentException("The operation '" + operation + "' must match <resource>.<verb>.");
                 }
             }

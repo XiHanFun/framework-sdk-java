@@ -1,5 +1,6 @@
 package com.xihanfun.framework.primitives;
 
+import com.xihanfun.framework.internal.WireNames;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,11 +34,11 @@ public enum PipelineStage {
     /** 按执行顺序的全部阶段。 */
     private static final List<PipelineStage> ALL = List.of(values());
 
-    /** 清单里的阶段名。 */
-    private final String manifestName;
+    /** 清单与打印里的小写阶段名。 */
+    private final String wireName;
 
-    PipelineStage(String manifestName) {
-        this.manifestName = manifestName;
+    PipelineStage(String wireName) {
+        this.wireName = wireName;
     }
 
     /**
@@ -56,20 +57,26 @@ public enum PipelineStage {
      * @return 阶段；名字未知时为空
      */
     public static Optional<PipelineStage> parse(String name) {
-        for (PipelineStage stage : ALL) {
-            if (stage.manifestName.equals(name)) {
-                return Optional.of(stage);
-            }
-        }
-        return Optional.empty();
+        return WireNames.find(values(), PipelineStage::wireName, name);
+    }
+
+    /**
+     * 返回清单与打印里的阶段名；与其他枚举的取名方法同名。
+     *
+     * @return 小写阶段名，如 {@code observe}
+     */
+    public String wireName() {
+        return wireName;
     }
 
     /**
      * 返回清单里的阶段名。
      *
      * @return 小写阶段名
+     * @deprecated 用 {@link #wireName()}：各枚举的取名方法统一叫这个名字，返回值相同。
      */
+    @Deprecated
     public String manifestName() {
-        return manifestName;
+        return wireName;
     }
 }

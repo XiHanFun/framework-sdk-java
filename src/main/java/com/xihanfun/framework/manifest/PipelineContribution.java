@@ -124,6 +124,6 @@ public final class PipelineContribution {
      */
     @Override
     public String toString() {
-        return stage.manifestName() + " " + middleware;
+        return stage.wireName() + " " + middleware;
     }
 }

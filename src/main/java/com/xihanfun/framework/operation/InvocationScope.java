@@ -16,6 +16,13 @@ final class InvocationScope {
     /** 上下文里的键。 */
     static final ContextKey<InvocationScope> KEY = ContextKey.named("xihan.operation.invocation");
 
+    /**
+     * 终点拿到的上下文不是从这次调用派生的（有中间件把别的上下文交给了下游）时返回的错误。终点只能从上下文里找这次调用，找不到就不知道是
+     * 哪个操作，所以这个错误没有参数 {@code id}；它不交给调用方：调用器在管道返回后按实例认出它，换成带 ID 的
+     * {@link OperationErrors#notFound(String)}。
+     */
+    static final Error DETACHED = Error.notFound(OperationErrors.NOT_FOUND, OperationMessages.UNKNOWN);
+
     final OperationDescriptor descriptor;
     final OperationRequest request;
 
@@ -46,8 +53,8 @@ final class InvocationScope {
     static Result<Unit> dispatch(Context context) {
         InvocationScope scope = context.findValue(KEY).orElse(null);
         if (scope == null) {
-            // 中间件换成了不是从调用派生的上下文：没有可执行的操作
-            return Result.fail(Error.notFound(OperationErrors.NOT_FOUND, OperationMessages.UNKNOWN));
+            // 中间件换成了不是从调用派生的上下文：没有可执行的操作；这里不知道操作 ID，由调用器补上
+            return Result.fail(DETACHED);
         }
         if (scope.typedRequest != null) {
             Result<?> result = scope.descriptor.executeTyped(context, scope.typedRequest);

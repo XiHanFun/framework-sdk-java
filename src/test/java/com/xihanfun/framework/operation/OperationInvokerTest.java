@@ -2,6 +2,7 @@ package com.xihanfun.framework.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -232,7 +233,7 @@ class OperationInvokerTest {
     void handlersSeeTheCancellationOfTheirContext() {
         OperationRegistry registry = new OperationRegistry();
         registry.add(OperationContract.of("jobs.run"), Unit.class, Unit.class,
-                (context, request) -> context.cancellation().<Result<Unit>>map(Result::fail).orElseGet(Result::success));
+                (context, request) -> context.cancellationError().<Result<Unit>>map(Result::fail).orElseGet(Result::success));
         OperationInvoker invoker = new OperationInvoker(registry);
         try (CancellableContext scope = Context.background().withCancellation()) {
             scope.cancel();
@@ -261,6 +262,12 @@ class OperationInvokerTest {
         assertEquals(Set.of(Expose.HTTP, Expose.AI), contract.withExpose(Expose.AI, Expose.HTTP).expose());
         assertEquals(Optional.of("orders.read"), contract.withPermission("orders.read").permission());
         assertEquals(Optional.of(Expose.COMMAND_LINE), Expose.parse("commandline"));
+        for (Expose expose : Expose.values()) {
+            assertEquals(Optional.of(expose), Expose.parse(expose.wireName()));
+        }
+        for (String unknown : java.util.Arrays.asList(null, "", "HTTP", "http ", "commandLine")) {
+            assertEquals(Optional.empty(), Expose.parse(unknown), "'" + unknown + "' is not a protocol");
+        }
         assertThrows(IllegalArgumentException.class, () -> OperationSchema.of("{}", "[]"));
         assertThrows(IllegalArgumentException.class, () -> OperationSchema.of("not json", "{}"));
         assertEquals("{\"type\":\"object\"}", OperationSchema.of("{\"type\":\"object\"}", "{}").request());
@@ -287,10 +294,93 @@ class OperationInvokerTest {
         PipelineBuilder pipeline = new PipelineBuilder().useAt(Middleware.of("Swallow", (context, next) -> Result.success()), PipelineStage.OBSERVE);
         OperationInvoker invoker = newInvoker(pipeline);
         Error error = invoker.invoke(Context.background(), OperationRequest.of("orders.create", "{\"quantity\":1}")).outcome().error().orElseThrow();
-        assertEquals(OperationErrors.UNEXPECTED, error.code());
+        assertEquals(InvocationErrors.UNHANDLED_EXCEPTION, error.code());
         assertEquals(Optional.of("kernel.operation.no_response"), error.messageKey());
         assertEquals(Map.of("id", "orders.create"), error.details());
         Result<OrderCreated> typed = invoker.invoke(Context.background(), "orders.create", new CreateOrder(1), OrderCreated.class);
-        assertEquals(OperationErrors.UNEXPECTED, typed.error().orElseThrow().code());
+        assertEquals(InvocationErrors.UNHANDLED_EXCEPTION, typed.error().orElseThrow().code());
+    }
+
+    @Test
+    void aContextThatWasNotDerivedFromTheInvocationStillNamesTheOperation() {
+        // 中间件把不是这次调用派生的上下文交给下游：终点找不到这次调用的状态，返回的错误仍要带操作 ID（kernel.operation.unknown 的参数 id）；
+        // 排在它前面的中间件把结果换了一层（toUnit）也一样
+        PipelineBuilder pipeline = new PipelineBuilder()
+                .useAt(Middleware.of("Rewrap", (context, next) -> next.invoke(context).toUnit()), PipelineStage.OBSERVE)
+                .useAt(Middleware.of("Detach", (context, next) -> next.invoke(Context.background())), PipelineStage.TRANSACTION);
+        OperationInvoker invoker = newInvoker(pipeline);
+        OperationResponse response = invoker.invoke(Context.background(), OperationRequest.of("orders.create", "{\"quantity\":1}"));
+        Error error = response.outcome().error().orElseThrow();
+        assertEquals(OperationErrors.NOT_FOUND, error.code());
+        assertEquals(Optional.of("kernel.operation.unknown"), error.messageKey());
+        assertEquals(Map.of("id", "orders.create"), error.details());
+        assertEquals("Operation 'orders.create' is not registered.", error.message());
+        Error typed = invoker.invoke(Context.background(), "orders.create", new CreateOrder(1), OrderCreated.class).error().orElseThrow();
+        assertEquals(OperationErrors.NOT_FOUND, typed.code());
+        assertEquals(Map.of("id", "orders.create"), typed.details());
+        assertEquals("Operation 'orders.create' is not registered.", typed.message());
+    }
+
+    @Test
+    void errorFactoriesFillTheTemplatesOfTheirKeys() {
+        // 「操作未登记」与「载荷不合法」只在 OperationErrors 拼一次：码、键、参数齐全，渲染出的文案带操作 ID
+        Error notFound = OperationErrors.notFound("orders.missing");
+        assertEquals(OperationErrors.NOT_FOUND, notFound.code());
+        assertEquals(Optional.of(OperationMessages.UNKNOWN), notFound.messageKey());
+        assertEquals(Map.of("id", "orders.missing"), notFound.details());
+        assertEquals("Operation 'orders.missing' is not registered.", notFound.message());
+        Error invalid = OperationErrors.invalidPayload("orders.create", "$.quantity");
+        assertEquals(OperationErrors.INVALID_PAYLOAD, invalid.code());
+        assertEquals(Optional.of(OperationMessages.INVALID_PAYLOAD), invalid.messageKey());
+        assertEquals(Map.of("id", "orders.create", "reason", "$.quantity"), invalid.details());
+        assertEquals("The payload of operation 'orders.create' is not valid: $.quantity", invalid.message());
+        assertThrows(NullPointerException.class, () -> OperationErrors.notFound(null));
+
+        // 调用器的两个入口用的就是它
+        OperationInvoker invoker = newInvoker(new PipelineBuilder());
+        Context context = Context.background();
+        assertEquals(Optional.of(notFound), invoker.invoke(context, OperationRequest.of("orders.missing")).outcome().error());
+        assertEquals(Optional.of(notFound), invoker.invoke(context, "orders.missing", new CreateOrder(1), OrderCreated.class).error());
+        OperationRequest badQuantity = OperationRequest.of("orders.create", "{\"quantity\":\"2\"}");
+        assertEquals(Optional.of(invalid), invoker.invoke(context, badQuantity).outcome().error());
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void theDeprecatedUnexpectedCodeIsTheInvocationOne() {
+        // KERNEL_UNEXPECTED_001 只定义一次（InvocationErrors），OperationErrors.UNEXPECTED 是保留的别名
+        assertEquals("KERNEL_UNEXPECTED_001", InvocationErrors.UNHANDLED_EXCEPTION);
+        assertEquals(InvocationErrors.UNHANDLED_EXCEPTION, OperationErrors.UNEXPECTED);
+    }
+
+    @Test
+    void middlewareSeesTheDecodedRequestAfterTheValidateStage() {
+        // RFC-0011 规则 3：解码后的请求对象记录在上下文。原始调用在 Validate 阶段的内置步骤解码之后才有，类型化调用一开始就有
+        List<Optional<Object>> before = new CopyOnWriteArrayList<>();
+        List<Optional<Object>> after = new CopyOnWriteArrayList<>();
+        PipelineBuilder pipeline = new PipelineBuilder()
+                .useAt(Middleware.of("Before", (context, next) -> {
+                    before.add(Operations.findDecodedRequest(context));
+                    return next.invoke(context);
+                }), PipelineStage.AUTHORIZE)
+                .useAt(Middleware.of("After", (context, next) -> {
+                    after.add(Operations.findDecodedRequest(context));
+                    return next.invoke(context);
+                }), PipelineStage.IDEMPOTENCY);
+        OperationInvoker invoker = newInvoker(pipeline);
+
+        assertTrue(invoker.invoke(correlated("c5"), OperationRequest.of("orders.create", "{\"quantity\":5}")).isOk());
+        assertEquals(List.of(Optional.empty()), before, "a raw call is not decoded before the Validate stage");
+        assertEquals(List.of(Optional.of(new CreateOrder(5))), after);
+
+        CreateOrder typed = new CreateOrder(6);
+        assertTrue(invoker.invoke(correlated("c6"), "orders.create", typed, OrderCreated.class).isOk());
+        assertSame(typed, before.get(1).orElseThrow(), "a typed call carries its request object from the start");
+        assertSame(typed, after.get(1).orElseThrow());
+
+        // 载荷不合法：Validate 之后的中间件不执行，也就看不到请求对象
+        assertFalse(invoker.invoke(Context.background(), OperationRequest.of("orders.create", "[1]")).isOk());
+        assertEquals(2, after.size());
+        assertEquals(Optional.empty(), Operations.findDecodedRequest(Context.background()), "outside an operation invocation");
     }
 }

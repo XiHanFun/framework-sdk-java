@@ -5,8 +5,11 @@
  * <p>模型类型不可变、线程安全。组成类型（{@link com.xihanfun.framework.manifest.Binding}、
  * {@link com.xihanfun.framework.manifest.CapabilityRequirement} 等）在构造时校验格式，不合法抛
  * {@link java.lang.IllegalArgumentException}；{@link com.xihanfun.framework.manifest.Manifest} 在 {@code build()} 时校验字段与跨字段约束，
- * 抛带 {@code PRIMITIVES_VALIDATION_001} 的 {@link com.xihanfun.framework.primitives.FrameworkException}；
- * {@link com.xihanfun.framework.manifest.ManifestJson} 读取失败时抛带 {@code KERNEL_CAPABILITY_006} 与 .NET 同一组消息键、参数的
- * {@code FrameworkException}（RFC-0002 解析规则 2，ADR-0236）。
+ * 抛带 {@code PRIMITIVES_VALIDATION_001} 的 {@link com.xihanfun.framework.primitives.FrameworkException}，跨字段约束也可以经构建器的
+ * {@code validate()} 以 {@link com.xihanfun.framework.primitives.Result} 取得。
+ *
+ * <p>读取的失败是可恢复的失败（RFC-0002 解析规则 2，ADR-0236）：{@link com.xihanfun.framework.manifest.ManifestJson} 的 {@code tryRead} /
+ * {@code tryReadFile} 以 {@code Result} 返回 {@code KERNEL_CAPABILITY_006} 与 .NET 同一组消息键、参数；{@code read} / {@code readFile}
+ * 是它们的包装，把同一个错误以 {@code FrameworkException} 抛出。
  */
 package com.xihanfun.framework.manifest;

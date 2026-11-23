@@ -7,6 +7,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.primitives.json.PrimitivesJson;
 import com.xihanfun.framework.primitives.json.PrimitivesModule;
 import java.io.IOException;

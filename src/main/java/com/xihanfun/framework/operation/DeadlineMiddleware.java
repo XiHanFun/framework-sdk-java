@@ -16,7 +16,7 @@ import java.util.Optional;
  * <p>进入时截止时间已到即以 {@code KERNEL_TIMEOUT_001} + {@code kernel.invocation.deadline_before_start} 结束，后面的中间件与处理器不执行；
  * 进入时不核对取消，构造上下文时也不做这项判断。途中的超时与取消按 RFC-0003 第 1 条归因：下游把取消写成了结果（{@code KERNEL_CANCELLED_001}）
  * 而截止令牌已触发时，改报 {@code KERNEL_TIMEOUT_001} + {@code kernel.invocation.deadline_exceeded}，调用方同时取消也一样。
- * 抛出路径由 Observe 阶段的内置步骤按同一规则归因（{@link Context#cancellation()} 先看截止令牌）。
+ * 抛出路径由 Observe 阶段的内置步骤按同一规则归因（{@link Context#cancellationError()} 先看截止令牌）。
  */
 final class DeadlineMiddleware implements Middleware {
     @Override
@@ -34,8 +34,8 @@ final class DeadlineMiddleware implements Middleware {
         return outcome;
     }
 
-    /** 截止令牌已触发：{@link Context#cancellation()} 在截止令牌触发时总是报超时，不论外部令牌。 */
+    /** 截止令牌已触发：{@link Context#cancellationError()} 在截止令牌触发时总是报超时，不论外部令牌。 */
     private static boolean deadlineFired(Context context) {
-        return context.cancellation().map(Error::code).filter(InvocationErrors.DEADLINE_EXCEEDED::equals).isPresent();
+        return context.cancellationError().map(Error::code).filter(InvocationErrors.DEADLINE_EXCEEDED::equals).isPresent();
     }
 }

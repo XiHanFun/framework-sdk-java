@@ -394,7 +394,7 @@ final class PluginService extends PluginGrpc.PluginImplBase {
             return Result.fail(InvocationErrors.unhandledException(failed.toError()));
         } catch (RuntimeException failed) {
             // 取消引起的异常按令牌归因（RFC-0003 规则 1），其余翻译为未处理异常（RFC-0011 规则 5）
-            Optional<Error> cancellation = context.cancellation();
+            Optional<Error> cancellation = context.cancellationError();
             if (cancellation.isPresent()) {
                 return Result.fail(cancellation.get());
             }

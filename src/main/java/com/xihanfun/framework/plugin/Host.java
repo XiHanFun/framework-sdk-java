@@ -6,7 +6,6 @@ import com.xihanfun.framework.invocation.ContextKey;
 import com.xihanfun.framework.invocation.InvocationErrors;
 import com.xihanfun.framework.invocation.Registration;
 import com.xihanfun.framework.operation.OperationErrors;
-import com.xihanfun.framework.operation.OperationMessages;
 import com.xihanfun.framework.operation.OperationRequest;
 import com.xihanfun.framework.operation.OperationResponse;
 import com.xihanfun.framework.plugin.v1.HostGrpc;
@@ -48,10 +47,26 @@ public final class Host {
     static final ContextKey<Host> KEY = ContextKey.named("xihan.plugin.host");
 
     /** 回调 {@code Host.Invoke} 需要的权限。 */
-    public static final String INVOKE_PERMISSION = "capability:kernel.pipeline";
+    public static final String PERMISSION_INVOKE = "capability:kernel.pipeline";
 
     /** 回调 {@code Host.Publish} 需要的权限。 */
-    public static final String PUBLISH_PERMISSION = "capability:messaging.queue";
+    public static final String PERMISSION_PUBLISH = "capability:messaging.queue";
+
+    /**
+     * 回调 {@code Host.Invoke} 需要的权限。
+     *
+     * @deprecated 用 {@link #PERMISSION_INVOKE}：与其他语言的 SDK 同名，取值相同。
+     */
+    @Deprecated
+    public static final String INVOKE_PERMISSION = PERMISSION_INVOKE;
+
+    /**
+     * 回调 {@code Host.Publish} 需要的权限。
+     *
+     * @deprecated 用 {@link #PERMISSION_PUBLISH}：与其他语言的 SDK 同名，取值相同。
+     */
+    @Deprecated
+    public static final String PUBLISH_PERMISSION = PERMISSION_PUBLISH;
 
     /** {@code Host.Invoke}：状态映射里的 RPC 名（{@code callback-status.json} 的 {@code rpc}）。 */
     static final String RPC_INVOKE = "invoke";
@@ -136,7 +151,7 @@ public final class Host {
     public OperationResponse invoke(Context context, OperationRequest request) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(request, "request");
-        Optional<Error> refused = refuse(context, RPC_INVOKE, request.id(), INVOKE_PERMISSION);
+        Optional<Error> refused = refuse(context, RPC_INVOKE, request.id(), PERMISSION_INVOKE);
         if (refused.isPresent()) {
             return OperationResponse.failed(refused.get());
         }
@@ -176,7 +191,7 @@ public final class Host {
         if (items.isEmpty()) {
             return new ArrayList<>();
         }
-        Optional<Error> refused = refuse(context, RPC_PUBLISH, RPC_PUBLISH, PUBLISH_PERMISSION);
+        Optional<Error> refused = refuse(context, RPC_PUBLISH, RPC_PUBLISH, PERMISSION_PUBLISH);
         if (refused.isPresent()) {
             return every(items.size(), Result.fail(refused.get()));
         }
@@ -226,8 +241,7 @@ public final class Host {
         }
         // 权限要在清单里声明并且已被授予：宿主授予而清单没有声明的权限不放行回调
         if (!declared.contains(permission) || !granted.contains(permission)) {
-            return Optional.of(Error.denied(PluginErrors.CALLBACK_DENIED, PluginMessages.CALLBACK_DENIED,
-                    Map.of("id", wire.pluginId(), "permission", permission)));
+            return Optional.of(PluginErrors.callbackDenied(wire.pluginId(), permission));
         }
         Optional<String> tenant = context.tenant();
         if (tenant.isPresent() && !calls.handed(tenant.get())) {
@@ -245,9 +259,9 @@ public final class Host {
         return Optional.empty();
     }
 
-    /** 上下文的截止令牌已触发：{@link Context#cancellation()} 在截止令牌触发时总是报超时，不论外部令牌，也不读时钟。 */
+    /** 上下文的截止令牌已触发：{@link Context#cancellationError()} 在截止令牌触发时总是报超时，不论外部令牌，也不读时钟。 */
     private static boolean deadlineFired(Context context) {
-        return context.cancellation().map(Error::code).filter(InvocationErrors.DEADLINE_EXCEEDED::equals).isPresent();
+        return context.cancellationError().map(Error::code).filter(InvocationErrors.DEADLINE_EXCEEDED::equals).isPresent();
     }
 
     /** 一次阻塞的 gRPC 调用。 */
@@ -282,7 +296,7 @@ public final class Host {
         // gRPC 调用带着同一个截止时间，由 grpc-java 在本端以 DeadlineExceeded 结束，结果只按映射表，不另按令牌改写（invocation.md §5）
         io.grpc.Context.CancellableContext scope = io.grpc.Context.current().withCancellation();
         Registration registration = context.onCancelled(() -> {
-            if (context.cancellation().map(Error::code).filter(InvocationErrors.CANCELLED::equals).isPresent()) {
+            if (context.cancellationError().map(Error::code).filter(InvocationErrors.CANCELLED::equals).isPresent()) {
                 scope.cancel(null);
             }
         });
@@ -325,8 +339,7 @@ public final class Host {
             return Error.denied(PluginErrors.CALLBACK_DENIED, PluginMessages.SESSION_INVALID);
         }
         if (code == Status.Code.PERMISSION_DENIED.value()) {
-            return Error.denied(PluginErrors.CALLBACK_DENIED, PluginMessages.CALLBACK_DENIED,
-                    Map.of("id", wire.pluginId(), "permission", invoke ? INVOKE_PERMISSION : PUBLISH_PERMISSION));
+            return PluginErrors.callbackDenied(wire.pluginId(), invoke ? PERMISSION_INVOKE : PERMISSION_PUBLISH);
         }
         if (code == Status.Code.DEADLINE_EXCEEDED.value()) {
             return InvocationErrors.deadlineExceeded();
@@ -341,10 +354,10 @@ public final class Host {
         }
         // Unimplemented 与 InvalidArgument 只对 Host.Invoke 有操作层面的含义；Host.Publish 的这两种状态落到最后一项
         if (code == Status.Code.UNIMPLEMENTED.value() && invoke) {
-            return Error.notFound(OperationErrors.NOT_FOUND, OperationMessages.UNKNOWN, Map.of("id", operation));
+            return OperationErrors.notFound(operation);
         }
         if (code == Status.Code.INVALID_ARGUMENT.value() && invoke) {
-            return Error.validation(OperationErrors.INVALID_PAYLOAD, OperationMessages.INVALID_PAYLOAD, Map.of("id", operation, "reason", message));
+            return OperationErrors.invalidPayload(operation, message);
         }
         return wire.failed(invoke ? operation : RPC_PUBLISH, reason);
     }

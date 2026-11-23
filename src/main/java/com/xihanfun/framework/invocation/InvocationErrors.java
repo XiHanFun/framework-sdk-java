@@ -12,7 +12,10 @@ public final class InvocationErrors {
     /** 调用在截止时间到达之前被调用方取消。 */
     public static final String CANCELLED = "KERNEL_CANCELLED_001";
 
-    /** 调用期间发生未处理的异常。 */
+    /**
+     * 调用期间的未预期失败（.NET 的 {@code KernelErrors.Unexpected}）：未处理的异常、响应编码失败，以及管道成功结束却没有响应
+     * （{@code kernel.operation.no_response}）。{@code KERNEL_UNEXPECTED_001} 只在这里定义一次。
+     */
     public static final String UNHANDLED_EXCEPTION = "KERNEL_UNEXPECTED_001";
 
     private InvocationErrors() {

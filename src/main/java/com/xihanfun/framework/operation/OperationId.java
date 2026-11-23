@@ -1,15 +1,14 @@
 package com.xihanfun.framework.operation;
 
+import com.xihanfun.framework.internal.Grammars;
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 /**
- * 操作 ID 的文法：{@code <resource>.<verb>}（{@code spec/conventions/operation-ids.md}）。
+ * 操作 ID 的文法：{@code <resource>.<verb>}（{@code spec/conventions/operation-ids.md}）：资源是小写复数名词（连字符分隔），动词小写。
+ *
+ * <p>文法只有一份，在模块内部与清单的 {@code contributes.operations} 共用。
  */
 public final class OperationId {
-    /** 资源是小写复数名词（连字符分隔），动词小写。 */
-    private static final Pattern PATTERN = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$");
-
     private OperationId() {
     }
 
@@ -20,7 +19,7 @@ public final class OperationId {
      * @return 合法时为真
      */
     public static boolean isValid(String id) {
-        return id != null && PATTERN.matcher(id).matches();
+        return id != null && Grammars.isOperationId(id);
     }
 
     /**

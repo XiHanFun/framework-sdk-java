@@ -4,11 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.pipeline.Middleware;
 import com.xihanfun.framework.pipeline.PipelineBuilder;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.FrameworkException;
+import com.xihanfun.framework.primitives.KernelMessages;
 import com.xihanfun.framework.primitives.MessageTemplate;
 import com.xihanfun.framework.primitives.PipelineStage;
 import com.xihanfun.framework.primitives.Result;
@@ -78,6 +80,18 @@ class KernelMessagesTest {
         assertEquals(7, checked, "every operation error of the table is produced");
         assertEquals("xihan.samples.ping", produced.get(OperationMessages.DUPLICATE).details().get("owner"), "the owner of the existing registration");
         assertEquals("The payload of operation 'pings.send' is not valid: $", produced.get(OperationMessages.INVALID_PAYLOAD).message());
+        assertEquals("Operation 'pings.missing' is not registered.", produced.get(OperationMessages.UNKNOWN).message());
+    }
+
+    @Test
+    void messageKeysAreTheSharedKernelKeys() {
+        // 键的文本只在 KernelMessages 写一遍，本包的常量引用它
+        assertEquals(KernelMessages.UNKNOWN_OPERATION, OperationMessages.UNKNOWN);
+        assertEquals(KernelMessages.INVALID_OPERATION_PAYLOAD, OperationMessages.INVALID_PAYLOAD);
+        assertEquals(KernelMessages.OPERATION_TYPE_MISMATCH, OperationMessages.TYPE_MISMATCH);
+        assertEquals(KernelMessages.OPERATION_NO_RESPONSE, OperationMessages.NO_RESPONSE);
+        assertEquals(KernelMessages.DUPLICATE_OPERATION, OperationMessages.DUPLICATE);
+        assertEquals(KernelMessages.OPERATION_REGISTRY_FULL, OperationMessages.REGISTRY_FULL);
     }
 
     private static Error failure(OperationResponse response) {

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.operation.Expose;

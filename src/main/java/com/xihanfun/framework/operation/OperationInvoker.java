@@ -1,6 +1,7 @@
 package com.xihanfun.framework.operation;
 
 import com.xihanfun.framework.invocation.Context;
+import com.xihanfun.framework.invocation.InvocationErrors;
 import com.xihanfun.framework.pipeline.PipelineBuilder;
 import com.xihanfun.framework.pipeline.Placement;
 import com.xihanfun.framework.pipeline.Step;
@@ -83,10 +84,10 @@ public final class OperationInvoker {
         Objects.requireNonNull(request, "request");
         Optional<OperationDescriptor> descriptor = registry.find(request.id());
         if (descriptor.isEmpty()) {
-            return OperationResponse.failed(notFound(request.id()));
+            return OperationResponse.failed(OperationErrors.notFound(request.id()));
         }
         InvocationScope scope = new InvocationScope(descriptor.get(), request, null);
-        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope));
+        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope), request.id());
         if (outcome.isFailed()) {
             return OperationResponse.failed(outcome.error().orElseThrow());
         }
@@ -117,7 +118,7 @@ public final class OperationInvoker {
         Objects.requireNonNull(responseType, "responseType");
         Optional<OperationDescriptor> found = registry.find(id);
         if (found.isEmpty()) {
-            return Result.fail(notFound(id));
+            return Result.fail(OperationErrors.notFound(id));
         }
         OperationDescriptor descriptor = found.get();
         // 请求按实例判断、响应按可赋值判断：登记的类型的子类实例与它的父类型都算相符，擦除后的泛型参数不参与判断
@@ -126,7 +127,7 @@ public final class OperationInvoker {
             return Result.fail(Error.validation(OperationErrors.TYPE_MISMATCH, OperationMessages.TYPE_MISMATCH, Map.of("id", id)));
         }
         InvocationScope scope = new InvocationScope(descriptor, OperationRequest.of(id), request);
-        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope));
+        Result<Unit> outcome = run(context.withValue(InvocationScope.KEY, scope), id);
         if (outcome.isFailed()) {
             return Result.fail(outcome.error().orElseThrow());
         }
@@ -139,16 +140,20 @@ public final class OperationInvoker {
 
     /**
      * 执行管道；异常由 Observe 阶段的内置步骤翻译，排在它之前的中间件抛出的异常原样交给调用方（RFC-0011 规则 10）。
+     *
+     * <p>有中间件把不是这次调用派生的上下文交给了下游时，终点找不到这次调用、不知道是哪个操作（{@link InvocationScope#DETACHED}）；
+     * 这里知道，换成带 ID 的「操作未登记」，调用方拿到的错误总能填出 {@code Operation '{id}' is not registered.}。
      */
-    private Result<Unit> run(Context context) {
-        return pipeline.invoke(context);
-    }
-
-    private static Error notFound(String id) {
-        return Error.notFound(OperationErrors.NOT_FOUND, OperationMessages.UNKNOWN, Map.of("id", id));
+    private Result<Unit> run(Context context, String id) {
+        Result<Unit> outcome = pipeline.invoke(context);
+        // 按实例比较：这个错误只由终点在找不到调用状态时返回，途中的中间件原样传回结果或只换了一层结果（toUnit、map）时仍是同一个实例
+        if (outcome.error().orElse(null) == InvocationScope.DETACHED) {
+            return Result.fail(OperationErrors.notFound(id));
+        }
+        return outcome;
     }
 
     private static Error noResponse(String id) {
-        return Error.unexpected(OperationErrors.UNEXPECTED, OperationMessages.NO_RESPONSE, Map.of("id", id));
+        return Error.unexpected(InvocationErrors.UNHANDLED_EXCEPTION, OperationMessages.NO_RESPONSE, Map.of("id", id));
     }
 }

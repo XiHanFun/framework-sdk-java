@@ -2,7 +2,6 @@
 target/
 *.class
 *.jar
-!.mvn/wrapper/*.jar
 dependency-reduced-pom.xml
 
 # 编辑器

@@ -13,8 +13,8 @@ import java.util.regex.Pattern;
  * @param optional 是否可选依赖
  */
 public record CapabilityRequirement(String id, int version, boolean optional) {
-    /** 依赖文本的文法。 */
-    private static final Pattern PATTERN = Pattern.compile("^([a-z][a-z0-9]*\\.[a-z][a-z0-9-]*)@(\\^?)([1-9][0-9]*)(\\??)$");
+    /** 依赖文本的文法：能力 ID（{@link CapabilityId} 的那一份文法）、{@code @}、可选的 {@code ^}、接口版本、可选的 {@code ?}。 */
+    private static final Pattern PATTERN = Pattern.compile("^(" + CapabilityId.GRAMMAR + ")@(\\^?)([1-9][0-9]*)(\\??)$");
 
     /**
      * 创建依赖。

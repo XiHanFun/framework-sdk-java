@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.primitives.MessageTemplate;
 import java.io.ByteArrayInputStream;
@@ -201,6 +202,22 @@ class PluginTypesTest {
         assertEquals(Optional.of(SubscriptionMode.COMPETING), SubscriptionMode.parse(""));
         assertEquals(Optional.of(SubscriptionMode.BROADCAST), SubscriptionMode.parse("broadcast"));
         assertEquals(Optional.empty(), SubscriptionMode.parse("Broadcast"));
+    }
+
+    @Test
+    void enumsParseExactlyTheirWireNames() {
+        // 各枚举的 parse 共用一个查找：整串相等、区分大小写，未知的名字为空；订阅方式的空值与 null 同竞争消费（invocation.md §4）
+        for (Network network : Network.values()) {
+            assertEquals(Optional.of(network), Network.parse(network.wireName()));
+        }
+        for (SubscriptionMode mode : SubscriptionMode.values()) {
+            assertEquals(Optional.of(mode), SubscriptionMode.parse(mode.wireName()));
+        }
+        for (String unknown : java.util.Arrays.asList(null, "", "TCP", "tcp ", "pipe")) {
+            assertEquals(Optional.empty(), Network.parse(unknown), "'" + unknown + "' is not a network");
+        }
+        assertEquals(Optional.of(SubscriptionMode.COMPETING), SubscriptionMode.parse(null));
+        assertEquals(Optional.empty(), SubscriptionMode.parse("competing "));
     }
 
     @Test

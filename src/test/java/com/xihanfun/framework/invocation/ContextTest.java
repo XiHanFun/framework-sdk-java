@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.primitives.BaggageKeys;
 import com.xihanfun.framework.primitives.Error;
+import com.xihanfun.framework.primitives.KernelMessages;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -59,17 +61,42 @@ class ContextTest {
         Duration remaining = context.remainingTime(Instant.now()).orElseThrow();
         assertTrue(remaining.compareTo(Duration.ofMillis(20)) <= 0, "remaining " + remaining);
         assertTrue(context.awaitCancellation(Duration.ofSeconds(5)));
-        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, context.cancellation().orElseThrow().code());
-        assertEquals("kernel.invocation.deadline_exceeded", context.cancellation().orElseThrow().messageKey().orElseThrow());
+        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, context.cancellationError().orElseThrow().code());
+        assertEquals("kernel.invocation.deadline_exceeded", context.cancellationError().orElseThrow().messageKey().orElseThrow());
         assertTrue(context.isExpired(Instant.now()));
 
         try (CancellableContext cancelled = Context.background().withCancellation()) {
             cancelled.cancel();
             assertTrue(cancelled.context().awaitCancellation(Duration.ofSeconds(5)));
-            assertEquals(InvocationErrors.CANCELLED, cancelled.context().cancellation().orElseThrow().code());
+            assertEquals(InvocationErrors.CANCELLED, cancelled.context().cancellationError().orElseThrow().code());
         }
-        assertEquals(Optional.empty(), Context.background().cancellation(), "no error without cancellation");
+        assertEquals(Optional.empty(), Context.background().cancellationError(), "no error without cancellation");
         assertFalse(Context.background().awaitCancellation(Duration.ofMillis(10)));
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void theDeprecatedCancellationReturnsTheCancellationError() {
+        // cancellation() 是保留的旧名：返回的是错误不是取消信号，新名字 cancellationError() 与其他语言的 SDK 一致
+        assertEquals(Optional.empty(), Context.background().cancellation());
+        try (CancellableContext cancelled = Context.background().withCancellation()) {
+            cancelled.cancel();
+            assertEquals(Optional.of(InvocationErrors.cancelled()), cancelled.context().cancellationError());
+            assertEquals(cancelled.context().cancellationError(), cancelled.context().cancellation());
+        }
+        Context expired = Context.builder().deadline(Instant.now().minusSeconds(1)).build();
+        assertEquals(Optional.of(InvocationErrors.deadlineExceeded()), expired.cancellationError());
+        assertEquals(expired.cancellationError(), expired.cancellation());
+    }
+
+    @Test
+    void messageKeysAreTheSharedKernelKeys() {
+        // 键的文本只在 KernelMessages 写一遍，本包的常量引用它
+        assertEquals(KernelMessages.DEADLINE_EXCEEDED, InvocationMessages.DEADLINE_EXCEEDED);
+        assertEquals(KernelMessages.DEADLINE_BEFORE_START, InvocationMessages.DEADLINE_BEFORE_START);
+        assertEquals(KernelMessages.CANCELLED, InvocationMessages.CANCELLED);
+        assertEquals(KernelMessages.UNHANDLED_EXCEPTION, InvocationMessages.UNHANDLED_EXCEPTION);
+        assertEquals("kernel.invocation.unhandled_exception", InvocationErrors.unhandledException().messageKey().orElseThrow());
     }
 
     @Test
@@ -164,16 +191,16 @@ class ContextTest {
         // RFC-0004：归因只看令牌；调用方先取消时报取消，截止令牌随后触发即改报超时，不论调用方是否也已取消
         CancellableContext scope = Context.background().withTimeout(Duration.ofMillis(50));
         scope.cancel();
-        assertEquals(InvocationErrors.CANCELLED, scope.context().cancellation().orElseThrow().code());
+        assertEquals(InvocationErrors.CANCELLED, scope.context().cancellationError().orElseThrow().code());
         long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (scope.context().cancellation().orElseThrow().code().equals(InvocationErrors.CANCELLED) && System.nanoTime() < until) {
+        while (scope.context().cancellationError().orElseThrow().code().equals(InvocationErrors.CANCELLED) && System.nanoTime() < until) {
             Thread.sleep(5);
         }
-        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, scope.context().cancellation().orElseThrow().code());
+        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, scope.context().cancellationError().orElseThrow().code());
 
         Context expired = Context.builder().deadline(Instant.now().minusSeconds(1)).build();
-        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, expired.cancellation().orElseThrow().code(), "a past deadline fires at once");
-        assertEquals(Optional.of(InvocationMessages.DEADLINE_EXCEEDED), expired.cancellation().orElseThrow().messageKey(),
+        assertEquals(InvocationErrors.DEADLINE_EXCEEDED, expired.cancellationError().orElseThrow().code(), "a past deadline fires at once");
+        assertEquals(Optional.of(InvocationMessages.DEADLINE_EXCEEDED), expired.cancellationError().orElseThrow().messageKey(),
                 "building a context does not decide 'before the start'; the invoker does (RFC-0011 rule 10)");
     }
 
@@ -182,11 +209,11 @@ class ContextTest {
         Map<String, Error> produced = new java.util.HashMap<>();
         Context timedOut = Context.builder().timeout(Duration.ofMillis(200)).build();
         assertTrue(timedOut.awaitCancellation(Duration.ofSeconds(5)));
-        produced.put(InvocationMessages.DEADLINE_EXCEEDED, timedOut.cancellation().orElseThrow());
+        produced.put(InvocationMessages.DEADLINE_EXCEEDED, timedOut.cancellationError().orElseThrow());
         produced.put(InvocationMessages.DEADLINE_BEFORE_START, InvocationErrors.deadlineBeforeStart());
         try (CancellableContext scope = Context.background().withCancellation()) {
             scope.cancel();
-            produced.put(InvocationMessages.CANCELLED, scope.context().cancellation().orElseThrow());
+            produced.put(InvocationMessages.CANCELLED, scope.context().cancellationError().orElseThrow());
         }
         int checked = 0;
         for (var message : Vectors.read("primitives/kernel-messages.json").get("messages")) {
@@ -217,7 +244,7 @@ class ContextTest {
             Context sharing = child.context().withBaggage(BaggageKeys.TENANT, "t1");
             parent.cancel();
             assertTrue(sharing.awaitCancellation(Duration.ofSeconds(5)), "derived contexts share the cancellation");
-            assertEquals(InvocationErrors.CANCELLED, child.context().cancellation().orElseThrow().code());
+            assertEquals(InvocationErrors.CANCELLED, child.context().cancellationError().orElseThrow().code());
             assertEquals(1, calls.get(), "callbacks run once and withdrawn ones not at all");
             child.cancel();
             assertEquals(1, calls.get());

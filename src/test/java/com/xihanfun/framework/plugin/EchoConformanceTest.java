@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xihanfun.examples.echo.EchoPlugin;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.manifest.Manifest;
 import com.xihanfun.framework.manifest.ManifestJson;
 import java.io.File;

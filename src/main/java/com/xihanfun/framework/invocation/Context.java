@@ -97,7 +97,7 @@ public final class Context {
     }
 
     /**
-     * 按给定时刻判断是否已过截止时间；只用于展示与估算，取消的归因看 {@link #cancellation()}。
+     * 按给定时刻判断是否已过截止时间；只用于展示与估算，取消的归因看 {@link #cancellationError()}。
      *
      * @param now 当前时刻
      * @return 有截止时间且不早于它时为真
@@ -138,7 +138,7 @@ public final class Context {
      * @return 截止令牌已触发为 {@code KERNEL_TIMEOUT_001} + {@value InvocationMessages#DEADLINE_EXCEEDED}，只有外部取消为
      *     {@code KERNEL_CANCELLED_001}；未取消时为空
      */
-    public Optional<Error> cancellation() {
+    public Optional<Error> cancellationError() {
         if (cancellation.isDeadlineFired()) {
             return Optional.of(InvocationErrors.deadlineExceeded());
         }
@@ -146,6 +146,18 @@ public final class Context {
             return Optional.of(InvocationErrors.cancelled());
         }
         return Optional.empty();
+    }
+
+    /**
+     * 把取消与超时翻译成原语层错误。
+     *
+     * @return 同 {@link #cancellationError()}
+     * @deprecated 用 {@link #cancellationError()}：返回的是错误，不是取消信号；其他语言的 SDK 里同名的成员是取消信号对象，
+     *     错误叫 {@code cancellationError}。返回值相同。
+     */
+    @Deprecated
+    public Optional<Error> cancellation() {
+        return cancellationError();
     }
 
     /**
