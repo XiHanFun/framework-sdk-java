@@ -33,7 +33,7 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 3. 检查当前分支、`git status`、最近提交与 `git submodule status`（`spec/` 是否已初始化、指向哪个提交）；保留用户已有改动。
 4. 读相关规范章节：`spec/rfcs/0001-primitives.md`、`0002-manifest.md`、`0003-invocation-context.md`、`0004-pipeline-stages.md`、`0010-localization.md`、`0011-operations.md`、`0017-plugin-protocol.md`、`0024-versions-and-profiles.md`，`spec/conventions/`（错误码、Baggage 键、能力 ID、操作 ID、术语表），`spec/manifest/manifest.schema.json`，`spec/plugin/handshake.md`、`lifecycle.md`、`invocation.md` 与 `plugin.proto`，`spec/conformance/profiles.json` 与 `spec/conformance/vectors/` 下对应的向量。只读与任务相关的部分。
 5. 读目标 Java 包的 `package-info.java`、`src/main/java/module-info.java`、相邻实现与 `src/test/java` 下同包的测试。
-6. 先找已有实现再动手：共同的 JSON 文本检查 `JsonText`、值模型 `JsonValues`、空白字符 `internal.Whitespace`、消息键常量类（`KernelMessages`、`InvocationMessages`、`OperationMessages`、`PluginMessages`）、错误工厂（`InvocationErrors`、`OperationErrors`、`PipelineErrors`、`PluginErrors`），不重复建设。
+6. 先找已有实现再动手：共同的 JSON 文本检查 `JsonText`、值模型 `JsonValues`、空白字符 `internal.Whitespace`、各枚举按线上名字的查找 `internal.WireNames`、不止一个包要核对的文法 `internal.Grammars`、消息键常量类（`KernelMessages` 是内核消息键唯一写出文本的地方，`InvocationMessages`、`OperationMessages` 引用它；另有 `PluginMessages`）、错误码常量类（`InvocationErrors`、`OperationErrors`、`PipelineErrors`、`PluginErrors`；前、二、四另有创建错误的工厂方法，`PipelineErrors` 只有错误码），不重复建设。
 
 ## 目录结构
 
@@ -96,7 +96,7 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 - 注释：Javadoc 与 `//` 注释用中文。公开类型与成员都写 Javadoc：首句概括，细节进 `<p>`，写明规范出处（RFC 编号、`invocation.md` §N、ADR 编号），带 `@param`、`@return`、`@throws`；需要说明的私有字段与方法用单行 `/** … */`。关键逻辑（锁与临界区、判定顺序、平台差异、绕开 Jackson 默认行为的原因）用 `//` 说明为什么，`//` 注释句末不加「。」。
 - 编译门禁：`-Xlint:all -Werror` 与 `-Xdoclint:all,-missing`，生成的协议代码也要通过；`@SuppressWarnings` 只在确有理由时用在最小范围上，`module-info.java` 的 `requires-automatic` 旁边写着原因。
 - 格式：`.editorconfig`：UTF-8、LF、文件末尾换行、去掉行尾空白，Java 4 空格缩进、每行最多 140 列；仓库没有 Checkstyle、Spotless 等格式化工具。`plugin/v1` 保持 protoc 的原样输出（`.gitattributes` 标为 `-whitespace linguist-generated`）。
-- 命名：Java 标准命名，常量 `UPPER_SNAKE_CASE`；消息键常量类 `<领域>Messages`、错误工厂 `<领域>Errors`；测试类 `<被测类型>Test`、回放向量的测试 `<名字>VectorsTest`，测试方法名是描述行为的英文驼峰句子。
+- 命名：Java 标准命名，常量 `UPPER_SNAKE_CASE`；消息键常量类 `<领域>Messages`、错误码常量类 `<领域>Errors`（不止一处要创建的错误在它上面给工厂方法）；测试类 `<被测类型>Test`、回放向量的测试 `<名字>VectorsTest`，测试方法名是描述行为的英文驼峰句子。
 - 错误：可恢复的失败返回 `Result` / `Error`，不抛异常。配置错误（清单不合法、管道成环、重复登记、登记表已满）抛带错误码的 `FrameworkException`；调用方的编程错误抛 `IllegalArgumentException`，状态不允许抛 `IllegalStateException`，`null` 参数经 `Objects.requireNonNull(value, "name")` 抛 `NullPointerException`。异常消息是英文句子，标识符加单引号。`com.xihanfun.framework.primitives.Error` 与 `java.lang.Error` 同名，用到时显式导入。
 - 文案只引用消息键（RFC-0010）：错误带消息键与参数（`Error.validation(code, key, Map.of(...))`），键定义在 `<领域>Messages` 常量类；`KernelMessages` 的英文模板与 `kernel-messages.json` 逐字相同；插件运行时的键与 `plugin-messages.json` 一致，10 种区域的语言文件在 `src/main/resources/com/xihanfun/framework/plugin/Localization/<区域>.json`；`Error.literal` 只用于线上还原与异常转换。
 - 可空性：公开成员不接受也不返回 `null`；可能没有的值返回 `Optional`，需要线上编码的字段用 `Maybe`，没有元素时是空集合。
