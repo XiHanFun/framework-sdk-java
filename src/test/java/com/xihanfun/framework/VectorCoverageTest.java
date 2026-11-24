@@ -64,6 +64,8 @@ class VectorCoverageTest {
             "primitives/lifecycle-transitions.json",
             // MessageTemplateVectorsTest
             "primitives/message-templates.json",
+            // OperationIdVectorsTest
+            "primitives/operation-ids.json",
             // ContextTest
             "primitives/trace-context.json",
             // WireEncodingVectorsTest

@@ -34,8 +34,11 @@ public final class Manifest {
     /** SemVer 文法。 */
     private static final Pattern SEMVER = Pattern.compile("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$");
 
-    /** 激活事件文法。 */
-    private static final Pattern ACTIVATION = Pattern.compile("^(onStartup|onOperation:[a-z0-9.*-]+|onEvent:[a-z0-9.*-]+)$");
+    /**
+     * 激活事件文法（RFC-0002 解析规则 2 第 3 步，{@code plugin/lifecycle.md} §3）：{@code onOperation:} 的模式是操作 ID 的字符加 {@code *}，
+     * {@code onEvent:} 的模式是主题的字符加 {@code *}，所以只有它可以带下划线（ADR-0276）。
+     */
+    private static final Pattern ACTIVATION = Pattern.compile("^(onStartup|onOperation:[a-z0-9.*-]+|onEvent:[a-z0-9._*-]+)$");
 
     /** 插件权限文法。 */
     private static final Pattern PERMISSION = Pattern.compile("^(net\\.outbound|fs\\.read|fs\\.write|capability):.+$");

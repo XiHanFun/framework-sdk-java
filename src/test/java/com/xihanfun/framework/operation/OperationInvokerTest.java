@@ -122,7 +122,7 @@ class OperationInvokerTest {
         OperationRegistry registry = new OperationRegistry();
         OperationHandler<Unit, Unit> handler = (context, request) -> Result.success();
         IllegalArgumentException badId = assertThrows(IllegalArgumentException.class, () -> OperationContract.of("Orders.Create"));
-        assertEquals("The operation ID 'Orders.Create' must match <resource>.<verb>.", badId.getMessage());
+        assertEquals("The operation ID 'Orders.Create' must match <resource>.<verb> and be at most 128 characters long.", badId.getMessage());
         assertThrows(IllegalArgumentException.class, () -> OperationContract.of("orders.create").withPermission("p").withPolicy("q"),
                 "permission and policy are exclusive");
         assertThrows(IllegalArgumentException.class, () -> OperationContract.of("orders.create").withPolicy("q").withPermission("p"));

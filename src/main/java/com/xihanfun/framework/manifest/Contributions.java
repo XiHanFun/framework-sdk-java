@@ -22,8 +22,8 @@ public final class Contributions {
     private static final Pattern HEALTH = Pattern.compile("^[a-z][a-z0-9.-]*$");
 
     /**
-     * 操作 ID 是否合文法（RFC-0011、conventions/operation-ids.md）：与 operation 包的 OperationId 用同一份文法；
-     * manifest 不依赖 operation，所以文法放在两个包都能引用的 internal 包里。
+     * 操作 ID 是否合法（RFC-0011、conventions/operation-ids.md）：合文法且不超过 128 个字符，与 operation 包的 OperationId 用同一份规则；
+     * manifest 不依赖 operation，所以规则放在两个包都能引用的 internal 包里。
      */
     static boolean isValidOperation(String operation) {
         return Grammars.isOperationId(operation);
@@ -234,12 +234,13 @@ public final class Contributions {
          * 校验并构建贡献点。
          *
          * @return 贡献点
-         * @throws IllegalArgumentException 操作 ID、权限码或健康项不合文法，或权限码重复
+         * @throws IllegalArgumentException 操作 ID（含超过 128 个字符的）、权限码或健康项不合文法，或权限码重复
          */
         public Contributions build() {
             for (String operation : operations) {
                 if (!isValidOperation(operation)) {
-                    throw new IllegalArgumentException("The operation '" + operation + "' must match <resource>.<verb>.");
+                    throw new IllegalArgumentException("The operation '" + operation + "' must match <resource>.<verb> and be at most "
+                            + Grammars.OPERATION_ID_MAX_LENGTH + " characters long.");
                 }
             }
             // 插件定义的权限码由宿主在登记代理操作时一并登记：不合文法或重复的码宿主在发现时拒绝整个插件，读清单时同样拒绝，不让它等到宿主那里才失败
