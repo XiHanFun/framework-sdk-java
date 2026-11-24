@@ -36,6 +36,8 @@ class VectorCoverageTest {
             "operations/payload-reasons.json",
             // OrderingVectorsTest
             "pipeline/ordering.json",
+            // BindingPropertiesVectorsTest（reading；其余各节是宿主一侧的）
+            "plugin/binding-properties.json",
             // HostCallbackTest
             "plugin/callback-status.json",
             // PluginTypesTest

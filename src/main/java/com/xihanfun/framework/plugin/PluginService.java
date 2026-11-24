@@ -122,9 +122,11 @@ final class PluginService extends PluginGrpc.PluginImplBase {
         if (!isJsonObject(section)) {
             outcome = Result.fail(runtime.wire.failed("configure", "the configuration is not a JSON object"));
         } else {
+            // 绑定连同属性原样交给作者（lifecycle.md §7.2）：属性名不折叠大小写、不核对文法与上限，没有属性时是空表；
+            // 主值与属性值可能是凭据，运行时不把它们写进日志与错误
             List<ResolvedBinding> bindings = new ArrayList<>();
             for (PluginProto.Binding binding : request.getBindingsList()) {
-                bindings.add(new ResolvedBinding(binding.getName(), binding.getType(), binding.getValue()));
+                bindings.add(new ResolvedBinding(binding.getName(), binding.getType(), binding.getValue(), binding.getPropertiesMap()));
             }
             Optional<Path> workDirectory = request.getWorkDirectory().isEmpty()
                     ? Optional.empty()

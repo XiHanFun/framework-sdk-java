@@ -41,7 +41,7 @@ public final class PluginConfiguration {
      *
      * @param section 配置节的 JSON 对象文本；空串按 {@code {}}
      * @param grantedPermissions 宿主授予的权限，等于清单 {@code permissions}；回调前的权限核对以它为准
-     * @param bindings 已解析的资源绑定
+     * @param bindings 已解析的资源绑定，按宿主下发的先后，每个连同它的属性
      * @param workDirectory 宿主分配的可写工作目录；没有时为空
      */
     public PluginConfiguration(String section, List<String> grantedPermissions, List<ResolvedBinding> bindings,
@@ -87,7 +87,7 @@ public final class PluginConfiguration {
     }
 
     /**
-     * 返回已解析的资源绑定。
+     * 返回已解析的资源绑定：按宿主下发的先后，每个连同它的属性（{@link ResolvedBinding#properties()}）。
      *
      * @return 只读列表
      */
@@ -116,7 +116,7 @@ public final class PluginConfiguration {
     }
 
     /**
-     * 返回不含配置值与连接串的文本：配置节里常有密钥，不进日志。
+     * 返回不含配置值、连接串与绑定属性值的文本：配置节与绑定里常有密钥，不进日志；绑定只带名字、类型与属性名。
      *
      * @return 文本
      */

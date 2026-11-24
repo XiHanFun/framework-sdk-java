@@ -13712,6 +13712,70 @@ java.lang.String defaultValue) {
      */
     com.google.protobuf.ByteString
         getValueBytes();
+
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    int getPropertiesCount();
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    boolean containsProperties(
+        java.lang.String key);
+    /**
+     * Use {@link #getPropertiesMap()} instead.
+     */
+    @java.lang.Deprecated
+    java.util.Map<java.lang.String, java.lang.String>
+    getProperties();
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    java.util.Map<java.lang.String, java.lang.String>
+    getPropertiesMap();
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    /* nullable */
+java.lang.String getPropertiesOrDefault(
+        java.lang.String key,
+        /* nullable */
+java.lang.String defaultValue);
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    java.lang.String getPropertiesOrThrow(
+        java.lang.String key);
   }
   /**
    * <pre>
@@ -13754,6 +13818,18 @@ java.lang.String defaultValue) {
       return com.xihanfun.framework.plugin.v1.PluginProto.internal_static_xihan_plugin_v1_Binding_descriptor;
     }
 
+    @SuppressWarnings({"rawtypes"})
+    @java.lang.Override
+    protected com.google.protobuf.MapFieldReflectionAccessor internalGetMapFieldReflection(
+        int number) {
+      switch (number) {
+        case 4:
+          return internalGetProperties();
+        default:
+          throw new RuntimeException(
+              "Invalid map field number: " + number);
+      }
+    }
     @java.lang.Override
     protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
         internalGetFieldAccessorTable() {
@@ -13903,6 +13979,109 @@ java.lang.String defaultValue) {
       }
     }
 
+    public static final int PROPERTIES_FIELD_NUMBER = 4;
+    private static final class PropertiesDefaultEntryHolder {
+      static final com.google.protobuf.MapEntry<
+          java.lang.String, java.lang.String> defaultEntry =
+              com.google.protobuf.MapEntry
+              .<java.lang.String, java.lang.String>newDefaultInstance(
+                  com.xihanfun.framework.plugin.v1.PluginProto.internal_static_xihan_plugin_v1_Binding_PropertiesEntry_descriptor, 
+                  com.google.protobuf.WireFormat.FieldType.STRING,
+                  "",
+                  com.google.protobuf.WireFormat.FieldType.STRING,
+                  "");
+    }
+    @SuppressWarnings("serial")
+    private com.google.protobuf.MapField<
+        java.lang.String, java.lang.String> properties_;
+    private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+    internalGetProperties() {
+      if (properties_ == null) {
+        return com.google.protobuf.MapField.emptyMapField(
+            PropertiesDefaultEntryHolder.defaultEntry);
+      }
+      return properties_;
+    }
+    public int getPropertiesCount() {
+      return internalGetProperties().getMap().size();
+    }
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    @java.lang.Override
+    public boolean containsProperties(
+        java.lang.String key) {
+      java.util.Objects.requireNonNull(key, "map key");
+      return internalGetProperties().getMap().containsKey(key);
+    }
+    /**
+     * Use {@link #getPropertiesMap()} instead.
+     */
+    @java.lang.Override
+    @java.lang.Deprecated
+    public java.util.Map<java.lang.String, java.lang.String> getProperties() {
+      return getPropertiesMap();
+    }
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    @java.lang.Override
+    public java.util.Map<java.lang.String, java.lang.String> getPropertiesMap() {
+      return internalGetProperties().getMap();
+    }
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    @java.lang.Override
+    public /* nullable */
+java.lang.String getPropertiesOrDefault(
+        java.lang.String key,
+        /* nullable */
+java.lang.String defaultValue) {
+      java.util.Objects.requireNonNull(key, "map key");
+      java.util.Map<java.lang.String, java.lang.String> map =
+          internalGetProperties().getMap();
+      return map.containsKey(key) ? map.get(key) : defaultValue;
+    }
+    /**
+     * <pre>
+     * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+     * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+     * 较早的宿主不发这个字段，较早的插件忽略它。
+     * </pre>
+     *
+     * <code>map&lt;string, string&gt; properties = 4;</code>
+     */
+    @java.lang.Override
+    public java.lang.String getPropertiesOrThrow(
+        java.lang.String key) {
+      java.util.Objects.requireNonNull(key, "map key");
+      java.util.Map<java.lang.String, java.lang.String> map =
+          internalGetProperties().getMap();
+      if (!map.containsKey(key)) {
+        throw new java.lang.IllegalArgumentException();
+      }
+      return map.get(key);
+    }
+
     private byte memoizedIsInitialized = -1;
     @java.lang.Override
     public final boolean isInitialized() {
@@ -13926,6 +14105,12 @@ java.lang.String defaultValue) {
       if (!com.google.protobuf.GeneratedMessage.isStringEmpty(value_)) {
         com.google.protobuf.GeneratedMessage.writeString(output, 3, value_);
       }
+      com.google.protobuf.GeneratedMessage
+        .serializeStringMapTo(
+          output,
+          internalGetProperties(),
+          PropertiesDefaultEntryHolder.defaultEntry,
+          4);
       getUnknownFields().writeTo(output);
     }
     private int computeSerializedSize_0() {
@@ -13938,6 +14123,16 @@ java.lang.String defaultValue) {
       }
       if (!com.google.protobuf.GeneratedMessage.isStringEmpty(value_)) {
         size += com.google.protobuf.GeneratedMessage.computeStringSize(3, value_);
+      }
+      for (java.util.Map.Entry<java.lang.String, java.lang.String> entry
+           : internalGetProperties().getMap().entrySet()) {
+        com.google.protobuf.MapEntry<java.lang.String, java.lang.String>
+        properties__ = PropertiesDefaultEntryHolder.defaultEntry.newBuilderForType()
+            .setKey(entry.getKey())
+            .setValue(entry.getValue())
+            .buildPartial();
+        size += com.google.protobuf.CodedOutputStream
+            .computeMessageSize(4, properties__);
       }
       return size;
     }
@@ -13969,6 +14164,8 @@ java.lang.String defaultValue) {
           .equals(other.getType())) return false;
       if (!getValue()
           .equals(other.getValue())) return false;
+      if (!internalGetProperties().equals(
+          other.internalGetProperties())) return false;
       if (!getUnknownFields().equals(other.getUnknownFields())) return false;
       return true;
     }
@@ -13986,6 +14183,10 @@ java.lang.String defaultValue) {
       hash = (53 * hash) + getType().hashCode();
       hash = (37 * hash) + VALUE_FIELD_NUMBER;
       hash = (53 * hash) + getValue().hashCode();
+      if (!internalGetProperties().getMap().isEmpty()) {
+        hash = (37 * hash) + PROPERTIES_FIELD_NUMBER;
+        hash = (53 * hash) + internalGetProperties().hashCode();
+      }
       hash = (29 * hash) + getUnknownFields().hashCode();
       memoizedHashCode = hash;
       return hash;
@@ -14099,6 +14300,28 @@ java.lang.String defaultValue) {
         return com.xihanfun.framework.plugin.v1.PluginProto.internal_static_xihan_plugin_v1_Binding_descriptor;
       }
 
+      @SuppressWarnings({"rawtypes"})
+      protected com.google.protobuf.MapFieldReflectionAccessor internalGetMapFieldReflection(
+          int number) {
+        switch (number) {
+          case 4:
+            return internalGetProperties();
+          default:
+            throw new RuntimeException(
+                "Invalid map field number: " + number);
+        }
+      }
+      @SuppressWarnings({"rawtypes"})
+      protected com.google.protobuf.MapFieldReflectionAccessor internalGetMutableMapFieldReflection(
+          int number) {
+        switch (number) {
+          case 4:
+            return internalGetMutableProperties();
+          default:
+            throw new RuntimeException(
+                "Invalid map field number: " + number);
+        }
+      }
       @java.lang.Override
       protected com.google.protobuf.GeneratedMessage.FieldAccessorTable
           internalGetFieldAccessorTable() {
@@ -14124,6 +14347,7 @@ java.lang.String defaultValue) {
         name_ = "";
         type_ = "";
         value_ = "";
+        internalGetMutableProperties().clear();
         return this;
       }
 
@@ -14166,6 +14390,10 @@ java.lang.String defaultValue) {
         if (((from_bitField0_ & 0x00000004) != 0)) {
           result.value_ = value_;
         }
+        if (((from_bitField0_ & 0x00000008) != 0)) {
+          result.properties_ = internalGetProperties();
+          result.properties_.makeImmutable();
+        }
       }
 
       @java.lang.Override
@@ -14195,6 +14423,9 @@ java.lang.String defaultValue) {
           bitField0_ |= 0x00000004;
           onChanged();
         }
+        internalGetMutableProperties().mergeFrom(
+            other.internalGetProperties());
+        bitField0_ |= 0x00000008;
         this.mergeUnknownFields(other.getUnknownFields());
         onChanged();
         return this;
@@ -14234,6 +14465,15 @@ java.lang.String defaultValue) {
                 bitField0_ |= 0x00000004;
                 break;
               } // case 26
+              case 34: {
+                com.google.protobuf.MapEntry<java.lang.String, java.lang.String>
+                properties__ = input.readMessage(
+                    PropertiesDefaultEntryHolder.defaultEntry.getParserForType(), extensionRegistry);
+                internalGetMutableProperties().getMutableMap().put(
+                    properties__.getKey(), properties__.getValue());
+                bitField0_ |= 0x00000008;
+                break;
+              } // case 34
               default: {
                 if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                   done = true; // was an endgroup tag
@@ -14524,6 +14764,175 @@ java.lang.String defaultValue) {
         value_ = value;
         bitField0_ |= 0x00000004;
         onChanged();
+        return this;
+      }
+
+      private com.google.protobuf.MapField<
+          java.lang.String, java.lang.String> properties_;
+      private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+          internalGetProperties() {
+        if (properties_ == null) {
+          return com.google.protobuf.MapField.emptyMapField(
+              PropertiesDefaultEntryHolder.defaultEntry);
+        }
+        return properties_;
+      }
+      private com.google.protobuf.MapField<java.lang.String, java.lang.String>
+          internalGetMutableProperties() {
+        if (properties_ == null) {
+          properties_ = com.google.protobuf.MapField.newMapField(
+              PropertiesDefaultEntryHolder.defaultEntry);
+        }
+        if (!properties_.isMutable()) {
+          properties_ = properties_.copy();
+        }
+        bitField0_ |= 0x00000008;
+        onChanged();
+        return properties_;
+      }
+      public int getPropertiesCount() {
+        return internalGetProperties().getMap().size();
+      }
+      /**
+       * <pre>
+       * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+       * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+       * 较早的宿主不发这个字段，较早的插件忽略它。
+       * </pre>
+       *
+       * <code>map&lt;string, string&gt; properties = 4;</code>
+       */
+      @java.lang.Override
+      public boolean containsProperties(
+          java.lang.String key) {
+        java.util.Objects.requireNonNull(key, "map key");
+        return internalGetProperties().getMap().containsKey(key);
+      }
+      /**
+       * Use {@link #getPropertiesMap()} instead.
+       */
+      @java.lang.Override
+      @java.lang.Deprecated
+      public java.util.Map<java.lang.String, java.lang.String> getProperties() {
+        return getPropertiesMap();
+      }
+      /**
+       * <pre>
+       * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+       * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+       * 较早的宿主不发这个字段，较早的插件忽略它。
+       * </pre>
+       *
+       * <code>map&lt;string, string&gt; properties = 4;</code>
+       */
+      @java.lang.Override
+      public java.util.Map<java.lang.String, java.lang.String> getPropertiesMap() {
+        return internalGetProperties().getMap();
+      }
+      /**
+       * <pre>
+       * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+       * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+       * 较早的宿主不发这个字段，较早的插件忽略它。
+       * </pre>
+       *
+       * <code>map&lt;string, string&gt; properties = 4;</code>
+       */
+      @java.lang.Override
+      public /* nullable */
+java.lang.String getPropertiesOrDefault(
+          java.lang.String key,
+          /* nullable */
+java.lang.String defaultValue) {
+        java.util.Objects.requireNonNull(key, "map key");
+        java.util.Map<java.lang.String, java.lang.String> map =
+            internalGetProperties().getMap();
+        return map.containsKey(key) ? map.get(key) : defaultValue;
+      }
+      /**
+       * <pre>
+       * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+       * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+       * 较早的宿主不发这个字段，较早的插件忽略它。
+       * </pre>
+       *
+       * <code>map&lt;string, string&gt; properties = 4;</code>
+       */
+      @java.lang.Override
+      public java.lang.String getPropertiesOrThrow(
+          java.lang.String key) {
+        java.util.Objects.requireNonNull(key, "map key");
+        java.util.Map<java.lang.String, java.lang.String> map =
+            internalGetProperties().getMap();
+        if (!map.containsKey(key)) {
+          throw new java.lang.IllegalArgumentException();
+        }
+        return map.get(key);
+      }
+      public Builder clearProperties() {
+        bitField0_ = (bitField0_ & ~0x00000008);
+        internalGetMutableProperties().getMutableMap()
+            .clear();
+        return this;
+      }
+      /**
+       * <pre>
+       * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+       * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+       * 较早的宿主不发这个字段，较早的插件忽略它。
+       * </pre>
+       *
+       * <code>map&lt;string, string&gt; properties = 4;</code>
+       */
+      public Builder removeProperties(
+          java.lang.String key) {
+        java.util.Objects.requireNonNull(key, "map key");
+        internalGetMutableProperties().getMutableMap()
+            .remove(key);
+        return this;
+      }
+      /**
+       * Use alternate mutation accessors instead.
+       */
+      @java.lang.Deprecated
+      public java.util.Map<java.lang.String, java.lang.String>
+          getMutableProperties() {
+        bitField0_ |= 0x00000008;
+        return internalGetMutableProperties().getMutableMap();
+      }
+      /**
+       * <pre>
+       * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+       * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+       * 较早的宿主不发这个字段，较早的插件忽略它。
+       * </pre>
+       *
+       * <code>map&lt;string, string&gt; properties = 4;</code>
+       */
+      public Builder putProperties(
+          java.lang.String key,
+          java.lang.String value) {
+        java.util.Objects.requireNonNull(key, "map key");
+        java.util.Objects.requireNonNull(value, "map value");
+        internalGetMutableProperties().getMutableMap()
+            .put(key, value);
+        bitField0_ |= 0x00000008;
+        return this;
+      }
+      /**
+       * <pre>
+       * 绑定的其余属性，键是属性名（区分大小写）、值是属性值；没有其余属性时为空。来源只给了属性、没有主值的绑定照常下发，
+       * `value` 为空。属性名的文法、数量与大小的上限见 lifecycle.md §2；属性值可能是凭据，宿主与插件都不得写进日志。
+       * 较早的宿主不发这个字段，较早的插件忽略它。
+       * </pre>
+       *
+       * <code>map&lt;string, string&gt; properties = 4;</code>
+       */
+      public Builder putAllProperties(
+          java.util.Map<java.lang.String, java.lang.String> values) {
+        internalGetMutableProperties().getMutableMap()
+            .putAll(values);
+        bitField0_ |= 0x00000008;
         return this;
       }
 
@@ -35305,6 +35714,11 @@ java.lang.String defaultValue) {
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
       internal_static_xihan_plugin_v1_Binding_fieldAccessorTable;
   private static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_xihan_plugin_v1_Binding_PropertiesEntry_descriptor;
+  private static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_xihan_plugin_v1_Binding_PropertiesEntry_fieldAccessorTable;
+  private static final com.google.protobuf.Descriptors.Descriptor
     internal_static_xihan_plugin_v1_ConfigureResponse_descriptor;
   private static final 
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
@@ -35466,105 +35880,108 @@ java.lang.String defaultValue) {
       "e\030\002 \001(\t:\0028\001\"\212\001\n\020ConfigureRequest\022\025\n\rconf" +
       "iguration\030\001 \001(\t\022\033\n\023granted_permissions\030\002" +
       " \003(\t\022*\n\010bindings\030\003 \003(\0132\030.xihan.plugin.v1" +
-      ".Binding\022\026\n\016work_directory\030\004 \001(\t\"4\n\007Bind" +
-      "ing\022\014\n\004name\030\001 \001(\t\022\014\n\004type\030\002 \001(\t\022\r\n\005value" +
-      "\030\003 \001(\t\"<\n\021ConfigureResponse\022\'\n\006status\030\001 " +
-      "\001(\0132\027.xihan.plugin.v1.Status\"\016\n\014StartReq" +
-      "uest\"8\n\rStartResponse\022\'\n\006status\030\001 \001(\0132\027." +
-      "xihan.plugin.v1.Status\"4\n\013StopRequest\022\025\n" +
-      "\rgrace_seconds\030\001 \001(\r\022\016\n\006reason\030\002 \001(\t\"7\n\014" +
-      "StopResponse\022\'\n\006status\030\001 \001(\0132\027.xihan.plu" +
-      "gin.v1.Status\"\017\n\rHealthRequest\"\223\001\n\016Healt" +
-      "hResponse\022.\n\005state\030\001 \001(\0162\037.xihan.plugin." +
-      "v1.LifecycleState\022*\n\005items\030\002 \003(\0132\033.xihan" +
-      ".plugin.v1.HealthItem\022%\n\005error\030\003 \001(\0132\026.x" +
-      "ihan.plugin.v1.Error\"^\n\nHealthItem\022\014\n\004na" +
-      "me\030\001 \001(\t\022-\n\006status\030\002 \001(\0162\035.xihan.plugin." +
-      "v1.HealthStatus\022\023\n\013description\030\003 \001(\t\"\304\001\n" +
-      "\022InvocationMetadata\022\024\n\014trace_parent\030\001 \001(" +
-      "\t\022\023\n\013trace_state\030\002 \001(\t\022\020\n\010deadline\030\003 \001(\t" +
-      "\022A\n\007baggage\030\004 \003(\01320.xihan.plugin.v1.Invo" +
-      "cationMetadata.BaggageEntry\032.\n\014BaggageEn" +
-      "try\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t:\0028\001\"j\n\rI" +
-      "nvokeRequest\022\021\n\toperation\030\001 \001(\t\022\017\n\007paylo" +
-      "ad\030\002 \001(\014\0225\n\010metadata\030\003 \001(\0132#.xihan.plugi" +
-      "n.v1.InvocationMetadata\"J\n\016InvokeRespons" +
+      ".Binding\022\026\n\016work_directory\030\004 \001(\t\"\245\001\n\007Bin" +
+      "ding\022\014\n\004name\030\001 \001(\t\022\014\n\004type\030\002 \001(\t\022\r\n\005valu" +
+      "e\030\003 \001(\t\022<\n\nproperties\030\004 \003(\0132(.xihan.plug" +
+      "in.v1.Binding.PropertiesEntry\0321\n\017Propert" +
+      "iesEntry\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t:\0028\001" +
+      "\"<\n\021ConfigureResponse\022\'\n\006status\030\001 \001(\0132\027." +
+      "xihan.plugin.v1.Status\"\016\n\014StartRequest\"8" +
+      "\n\rStartResponse\022\'\n\006status\030\001 \001(\0132\027.xihan." +
+      "plugin.v1.Status\"4\n\013StopRequest\022\025\n\rgrace" +
+      "_seconds\030\001 \001(\r\022\016\n\006reason\030\002 \001(\t\"7\n\014StopRe" +
+      "sponse\022\'\n\006status\030\001 \001(\0132\027.xihan.plugin.v1" +
+      ".Status\"\017\n\rHealthRequest\"\223\001\n\016HealthRespo" +
+      "nse\022.\n\005state\030\001 \001(\0162\037.xihan.plugin.v1.Lif" +
+      "ecycleState\022*\n\005items\030\002 \003(\0132\033.xihan.plugi" +
+      "n.v1.HealthItem\022%\n\005error\030\003 \001(\0132\026.xihan.p" +
+      "lugin.v1.Error\"^\n\nHealthItem\022\014\n\004name\030\001 \001" +
+      "(\t\022-\n\006status\030\002 \001(\0162\035.xihan.plugin.v1.Hea" +
+      "lthStatus\022\023\n\013description\030\003 \001(\t\"\304\001\n\022Invoc" +
+      "ationMetadata\022\024\n\014trace_parent\030\001 \001(\t\022\023\n\013t" +
+      "race_state\030\002 \001(\t\022\020\n\010deadline\030\003 \001(\t\022A\n\007ba" +
+      "ggage\030\004 \003(\01320.xihan.plugin.v1.Invocation" +
+      "Metadata.BaggageEntry\032.\n\014BaggageEntry\022\013\n" +
+      "\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t:\0028\001\"j\n\rInvokeR" +
+      "equest\022\021\n\toperation\030\001 \001(\t\022\017\n\007payload\030\002 \001" +
+      "(\014\0225\n\010metadata\030\003 \001(\0132#.xihan.plugin.v1.I" +
+      "nvocationMetadata\"J\n\016InvokeResponse\022\'\n\006s" +
+      "tatus\030\001 \001(\0132\027.xihan.plugin.v1.Status\022\017\n\007" +
+      "payload\030\002 \001(\014\"\200\001\n\013StreamFrame\022/\n\005start\030\001" +
+      " \001(\0132\036.xihan.plugin.v1.InvokeRequestH\000\022\017" +
+      "\n\005chunk\030\002 \001(\014H\000\022&\n\003end\030\003 \001(\0132\027.xihan.plu" +
+      "gin.v1.StatusH\000B\007\n\005frame\"\227\001\n\022HandleEvent" +
+      "Request\022+\n\010envelope\030\001 \001(\0132\031.xihan.plugin" +
+      ".v1.Envelope\0225\n\010metadata\030\002 \001(\0132#.xihan.p" +
+      "lugin.v1.InvocationMetadata\022\017\n\007attempt\030\003" +
+      " \001(\r\022\014\n\004mode\030\004 \001(\t\">\n\023HandleEventRespons" +
       "e\022\'\n\006status\030\001 \001(\0132\027.xihan.plugin.v1.Stat" +
-      "us\022\017\n\007payload\030\002 \001(\014\"\200\001\n\013StreamFrame\022/\n\005s" +
-      "tart\030\001 \001(\0132\036.xihan.plugin.v1.InvokeReque" +
-      "stH\000\022\017\n\005chunk\030\002 \001(\014H\000\022&\n\003end\030\003 \001(\0132\027.xih" +
-      "an.plugin.v1.StatusH\000B\007\n\005frame\"\227\001\n\022Handl" +
-      "eEventRequest\022+\n\010envelope\030\001 \001(\0132\031.xihan." +
-      "plugin.v1.Envelope\0225\n\010metadata\030\002 \001(\0132#.x" +
-      "ihan.plugin.v1.InvocationMetadata\022\017\n\007att" +
-      "empt\030\003 \001(\r\022\014\n\004mode\030\004 \001(\t\">\n\023HandleEventR" +
-      "esponse\022\'\n\006status\030\001 \001(\0132\027.xihan.plugin.v" +
-      "1.Status\"\223\002\n\010Envelope\022\r\n\005topic\030\001 \001(\t\022\n\n\002" +
-      "id\030\002 \001(\t\022\016\n\006source\030\003 \001(\t\022\014\n\004type\030\004 \001(\t\022\024" +
-      "\n\014spec_version\030\005 \001(\t\022\017\n\007subject\030\006 \001(\t\022\014\n" +
-      "\004time\030\007 \001(\t\022\031\n\021data_content_type\030\010 \001(\t\022\014" +
-      "\n\004data\030\t \001(\014\022=\n\nextensions\030\n \003(\0132).xihan" +
-      ".plugin.v1.Envelope.ExtensionsEntry\0321\n\017E" +
-      "xtensionsEntry\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001" +
-      "(\t:\0028\001\"u\n\016PublishRequest\022,\n\tenvelopes\030\001 " +
-      "\003(\0132\031.xihan.plugin.v1.Envelope\0225\n\010metada" +
-      "ta\030\002 \001(\0132#.xihan.plugin.v1.InvocationMet" +
-      "adata\";\n\017PublishResponse\022(\n\007results\030\001 \003(" +
-      "\0132\027.xihan.plugin.v1.Status\"\271\001\n\021Middlewar" +
-      "eRequest\022\022\n\nmiddleware\030\001 \001(\t\022\r\n\005stage\030\002 " +
-      "\001(\t\022\r\n\005phase\030\003 \001(\t\0225\n\010metadata\030\004 \001(\0132#.x" +
-      "ihan.plugin.v1.InvocationMetadata\022\021\n\tope" +
-      "ration\030\005 \001(\t\022(\n\007outcome\030\006 \001(\0132\027.xihan.pl" +
-      "ugin.v1.Status\"\344\001\n\022MiddlewareResponse\0221\n" +
-      "\006action\030\001 \001(\0162!.xihan.plugin.v1.Middlewa" +
-      "reAction\022(\n\007outcome\030\002 \001(\0132\027.xihan.plugin" +
-      ".v1.Status\022A\n\007baggage\030\003 \003(\01320.xihan.plug" +
-      "in.v1.MiddlewareResponse.BaggageEntry\032.\n" +
-      "\014BaggageEntry\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(" +
-      "\t:\0028\001\";\n\006Status\022\n\n\002ok\030\001 \001(\010\022%\n\005error\030\002 \001" +
-      "(\0132\026.xihan.plugin.v1.Error\"p\n\005Error\022\014\n\004c" +
-      "ode\030\001 \001(\t\022\023\n\013message_key\030\002 \001(\t\022\014\n\004text\030\003" +
-      " \001(\t\022\017\n\007details\030\004 \001(\t\022%\n\005inner\030\005 \001(\0132\026.x" +
-      "ihan.plugin.v1.Error*\201\001\n\014HealthStatus\022\035\n" +
-      "\031HEALTH_STATUS_UNSPECIFIED\020\000\022\031\n\025HEALTH_S" +
-      "TATUS_HEALTHY\020\001\022\032\n\026HEALTH_STATUS_DEGRADE" +
-      "D\020\002\022\033\n\027HEALTH_STATUS_UNHEALTHY\020\003*\231\002\n\016Lif" +
-      "ecycleState\022\034\n\030LIFECYCLE_STATE_DECLARED\020" +
-      "\000\022\034\n\030LIFECYCLE_STATE_RESOLVED\020\001\022\036\n\032LIFEC" +
-      "YCLE_STATE_CONFIGURED\020\002\022\033\n\027LIFECYCLE_STA" +
-      "TE_STARTED\020\003\022\031\n\025LIFECYCLE_STATE_READY\020\004\022" +
-      "\034\n\030LIFECYCLE_STATE_DEGRADED\020\005\022\034\n\030LIFECYC" +
-      "LE_STATE_DRAINING\020\006\022\033\n\027LIFECYCLE_STATE_S" +
-      "TOPPED\020\007\022\032\n\026LIFECYCLE_STATE_FAILED\020\010*z\n\020" +
-      "MiddlewareAction\022!\n\035MIDDLEWARE_ACTION_UN" +
-      "SPECIFIED\020\000\022\036\n\032MIDDLEWARE_ACTION_CONTINU" +
-      "E\020\001\022#\n\037MIDDLEWARE_ACTION_SHORT_CIRCUIT\020\002" +
-      "2\317\005\n\006Plugin\022R\n\tHandshake\022!.xihan.plugin." +
-      "v1.HandshakeRequest\032\".xihan.plugin.v1.Ha" +
-      "ndshakeResponse\022R\n\tConfigure\022!.xihan.plu" +
-      "gin.v1.ConfigureRequest\032\".xihan.plugin.v" +
-      "1.ConfigureResponse\022F\n\005Start\022\035.xihan.plu" +
-      "gin.v1.StartRequest\032\036.xihan.plugin.v1.St" +
-      "artResponse\022C\n\004Stop\022\034.xihan.plugin.v1.St" +
-      "opRequest\032\035.xihan.plugin.v1.StopResponse" +
-      "\022I\n\006Health\022\036.xihan.plugin.v1.HealthReque" +
-      "st\032\037.xihan.plugin.v1.HealthResponse\022P\n\013W" +
-      "atchHealth\022\036.xihan.plugin.v1.HealthReque" +
-      "st\032\037.xihan.plugin.v1.HealthResponse0\001\022I\n" +
-      "\006Invoke\022\036.xihan.plugin.v1.InvokeRequest\032" +
-      "\037.xihan.plugin.v1.InvokeResponse\022N\n\014Invo" +
-      "keStream\022\034.xihan.plugin.v1.StreamFrame\032\034" +
-      ".xihan.plugin.v1.StreamFrame(\0010\001\022X\n\013Hand" +
-      "leEvent\022#.xihan.plugin.v1.HandleEventReq" +
-      "uest\032$.xihan.plugin.v1.HandleEventRespon" +
-      "se2\237\001\n\004Host\022I\n\006Invoke\022\036.xihan.plugin.v1." +
-      "InvokeRequest\032\037.xihan.plugin.v1.InvokeRe" +
-      "sponse\022L\n\007Publish\022\037.xihan.plugin.v1.Publ" +
-      "ishRequest\032 .xihan.plugin.v1.PublishResp" +
-      "onseB\216\001\n com.xihanfun.framework.plugin.v" +
-      "1B\013PluginProtoZ7github.com/xihanfun/fram" +
-      "ework-sdk-go/plugin/v1;pluginv1\252\002#XiHan." +
-      "Framework.Plugins.Protocol.V1b\006proto3"
+      "us\"\223\002\n\010Envelope\022\r\n\005topic\030\001 \001(\t\022\n\n\002id\030\002 \001" +
+      "(\t\022\016\n\006source\030\003 \001(\t\022\014\n\004type\030\004 \001(\t\022\024\n\014spec" +
+      "_version\030\005 \001(\t\022\017\n\007subject\030\006 \001(\t\022\014\n\004time\030" +
+      "\007 \001(\t\022\031\n\021data_content_type\030\010 \001(\t\022\014\n\004data" +
+      "\030\t \001(\014\022=\n\nextensions\030\n \003(\0132).xihan.plugi" +
+      "n.v1.Envelope.ExtensionsEntry\0321\n\017Extensi" +
+      "onsEntry\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t:\0028\001" +
+      "\"u\n\016PublishRequest\022,\n\tenvelopes\030\001 \003(\0132\031." +
+      "xihan.plugin.v1.Envelope\0225\n\010metadata\030\002 \001" +
+      "(\0132#.xihan.plugin.v1.InvocationMetadata\"" +
+      ";\n\017PublishResponse\022(\n\007results\030\001 \003(\0132\027.xi" +
+      "han.plugin.v1.Status\"\271\001\n\021MiddlewareReque" +
+      "st\022\022\n\nmiddleware\030\001 \001(\t\022\r\n\005stage\030\002 \001(\t\022\r\n" +
+      "\005phase\030\003 \001(\t\0225\n\010metadata\030\004 \001(\0132#.xihan.p" +
+      "lugin.v1.InvocationMetadata\022\021\n\toperation" +
+      "\030\005 \001(\t\022(\n\007outcome\030\006 \001(\0132\027.xihan.plugin.v" +
+      "1.Status\"\344\001\n\022MiddlewareResponse\0221\n\006actio" +
+      "n\030\001 \001(\0162!.xihan.plugin.v1.MiddlewareActi" +
+      "on\022(\n\007outcome\030\002 \001(\0132\027.xihan.plugin.v1.St" +
+      "atus\022A\n\007baggage\030\003 \003(\01320.xihan.plugin.v1." +
+      "MiddlewareResponse.BaggageEntry\032.\n\014Bagga" +
+      "geEntry\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t:\0028\001\"" +
+      ";\n\006Status\022\n\n\002ok\030\001 \001(\010\022%\n\005error\030\002 \001(\0132\026.x" +
+      "ihan.plugin.v1.Error\"p\n\005Error\022\014\n\004code\030\001 " +
+      "\001(\t\022\023\n\013message_key\030\002 \001(\t\022\014\n\004text\030\003 \001(\t\022\017" +
+      "\n\007details\030\004 \001(\t\022%\n\005inner\030\005 \001(\0132\026.xihan.p" +
+      "lugin.v1.Error*\201\001\n\014HealthStatus\022\035\n\031HEALT" +
+      "H_STATUS_UNSPECIFIED\020\000\022\031\n\025HEALTH_STATUS_" +
+      "HEALTHY\020\001\022\032\n\026HEALTH_STATUS_DEGRADED\020\002\022\033\n" +
+      "\027HEALTH_STATUS_UNHEALTHY\020\003*\231\002\n\016Lifecycle" +
+      "State\022\034\n\030LIFECYCLE_STATE_DECLARED\020\000\022\034\n\030L" +
+      "IFECYCLE_STATE_RESOLVED\020\001\022\036\n\032LIFECYCLE_S" +
+      "TATE_CONFIGURED\020\002\022\033\n\027LIFECYCLE_STATE_STA" +
+      "RTED\020\003\022\031\n\025LIFECYCLE_STATE_READY\020\004\022\034\n\030LIF" +
+      "ECYCLE_STATE_DEGRADED\020\005\022\034\n\030LIFECYCLE_STA" +
+      "TE_DRAINING\020\006\022\033\n\027LIFECYCLE_STATE_STOPPED" +
+      "\020\007\022\032\n\026LIFECYCLE_STATE_FAILED\020\010*z\n\020Middle" +
+      "wareAction\022!\n\035MIDDLEWARE_ACTION_UNSPECIF" +
+      "IED\020\000\022\036\n\032MIDDLEWARE_ACTION_CONTINUE\020\001\022#\n" +
+      "\037MIDDLEWARE_ACTION_SHORT_CIRCUIT\020\0022\317\005\n\006P" +
+      "lugin\022R\n\tHandshake\022!.xihan.plugin.v1.Han" +
+      "dshakeRequest\032\".xihan.plugin.v1.Handshak" +
+      "eResponse\022R\n\tConfigure\022!.xihan.plugin.v1" +
+      ".ConfigureRequest\032\".xihan.plugin.v1.Conf" +
+      "igureResponse\022F\n\005Start\022\035.xihan.plugin.v1" +
+      ".StartRequest\032\036.xihan.plugin.v1.StartRes" +
+      "ponse\022C\n\004Stop\022\034.xihan.plugin.v1.StopRequ" +
+      "est\032\035.xihan.plugin.v1.StopResponse\022I\n\006He" +
+      "alth\022\036.xihan.plugin.v1.HealthRequest\032\037.x" +
+      "ihan.plugin.v1.HealthResponse\022P\n\013WatchHe" +
+      "alth\022\036.xihan.plugin.v1.HealthRequest\032\037.x" +
+      "ihan.plugin.v1.HealthResponse0\001\022I\n\006Invok" +
+      "e\022\036.xihan.plugin.v1.InvokeRequest\032\037.xiha" +
+      "n.plugin.v1.InvokeResponse\022N\n\014InvokeStre" +
+      "am\022\034.xihan.plugin.v1.StreamFrame\032\034.xihan" +
+      ".plugin.v1.StreamFrame(\0010\001\022X\n\013HandleEven" +
+      "t\022#.xihan.plugin.v1.HandleEventRequest\032$" +
+      ".xihan.plugin.v1.HandleEventResponse2\237\001\n" +
+      "\004Host\022I\n\006Invoke\022\036.xihan.plugin.v1.Invoke" +
+      "Request\032\037.xihan.plugin.v1.InvokeResponse" +
+      "\022L\n\007Publish\022\037.xihan.plugin.v1.PublishReq" +
+      "uest\032 .xihan.plugin.v1.PublishResponseB\216" +
+      "\001\n com.xihanfun.framework.plugin.v1B\013Plu" +
+      "ginProtoZ7github.com/xihanfun/framework-" +
+      "sdk-go/plugin/v1;pluginv1\252\002#XiHan.Framew" +
+      "ork.Plugins.Protocol.V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -35641,7 +36058,13 @@ java.lang.String defaultValue) {
     internal_static_xihan_plugin_v1_Binding_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_xihan_plugin_v1_Binding_descriptor,
-        new java.lang.String[] { "Name", "Type", "Value", });
+        new java.lang.String[] { "Name", "Type", "Value", "Properties", });
+    internal_static_xihan_plugin_v1_Binding_PropertiesEntry_descriptor =
+      internal_static_xihan_plugin_v1_Binding_descriptor.getNestedType(0);
+    internal_static_xihan_plugin_v1_Binding_PropertiesEntry_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_xihan_plugin_v1_Binding_PropertiesEntry_descriptor,
+        new java.lang.String[] { "Key", "Value", });
     internal_static_xihan_plugin_v1_ConfigureResponse_descriptor =
       getDescriptor().getMessageType(11);
     internal_static_xihan_plugin_v1_ConfigureResponse_fieldAccessorTable = new
