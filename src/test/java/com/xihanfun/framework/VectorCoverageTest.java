@@ -42,7 +42,7 @@ class VectorCoverageTest {
             "plugin/callback-status.json",
             // PluginTypesTest
             "plugin/deadlines.json",
-            // EnvelopeTest（host 档；SDK 读宿主写来的 time 是同一条文法）
+            // EnvelopeTest（valid 与 invalid：SDK 读宿主写来的 time 是同一条文法；written 是宿主的写法，SDK 读得出）
             "plugin/envelope-times.json",
             // HostCallbackTest
             "plugin/error-reading.json",
@@ -54,6 +54,8 @@ class VectorCoverageTest {
             "plugin/plugin-messages.json",
             // PluginRuntimeTest
             "plugin/protocol-versions.json",
+            // EnvelopeTest（取 nanoseconds 一项）、PluginCallsTest（unreadable 经 gRPC 投递）
+            "plugin/sdk-envelope-times.json",
             // PrimitivesTest、ContextTest
             "primitives/baggage-keys.json",
             // ManifestTest

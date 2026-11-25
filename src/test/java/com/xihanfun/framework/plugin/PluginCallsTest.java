@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.google.protobuf.ByteString;
+import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.operation.OperationContract;
 import com.xihanfun.framework.operation.OperationRegistry;
@@ -257,6 +259,13 @@ class PluginCallsTest {
                 StatusRuntimeException badTime = assertThrows(StatusRuntimeException.class, () -> plugin.stub()
                         .handleEvent(withEnvelope(RunningPlugin.eventRequest(topic, "x", "competing"), "2026-11-25T03:25:00", "")));
                 assertEquals(Status.Code.INVALID_ARGUMENT, badTime.getStatus().getCode(), topic);
+            }
+            // sdk-envelope-times.json 的 unreadable 经 gRPC 投递，每一条都以 InvalidArgument 拒绝（ADR-0310）
+            for (JsonNode unreadable : Vectors.read("plugin/sdk-envelope-times.json").get("unreadable")) {
+                String time = unreadable.get("text").asText();
+                StatusRuntimeException badTime = assertThrows(StatusRuntimeException.class, () -> plugin.stub()
+                        .handleEvent(withEnvelope(RunningPlugin.eventRequest("samples.events", "x", "competing"), time, "")));
+                assertEquals(Status.Code.INVALID_ARGUMENT, badTime.getStatus().getCode(), unreadable.get("name").asText());
             }
             assertEquals(List.of(), received, "an envelope whose time cannot be read reaches no handler");
         }

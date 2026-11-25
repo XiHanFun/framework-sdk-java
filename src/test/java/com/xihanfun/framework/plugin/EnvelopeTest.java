@@ -17,9 +17,13 @@ import org.junit.jupiter.api.Test;
 
 /**
  * 信封的 {@code time} 与 {@code dataschema}（{@code invocation.md} §4，RFC-0009「信封」第 3 条，ADR-0305）：写出的文本、读入、往返与没有时间；
- * 回放 {@code envelope-times.json}（host 档：宿主读插件写来的 {@code time} 与 SDK 读宿主写来的是同一条文法）。
+ * 回放 {@code plugin} 档的 {@code envelope-times.json}（宿主读插件写来的 {@code time} 与 SDK 读宿主写来的是同一条文法）与
+ * {@code sdk-envelope-times.json}（SDK 一侧按时间类型精度的写出与读入，ADR-0310）。
  */
 class EnvelopeTest {
+    /** {@link Instant} 的精度在 {@code sdk-envelope-times.json} 里的名字：纳秒，写出时最多九位小数。 */
+    private static final String PRECISION = "nanoseconds";
+
     /** 作者给的时刻与 SDK 写出的 {@code time}。 */
     record Written(Instant time, String text) {
     }
@@ -108,6 +112,32 @@ class EnvelopeTest {
             Optional<Instant> expected = instant.isNull() ? Optional.empty()
                     : Optional.of(OffsetDateTime.parse(instant.asText()).toInstant());
             assertEquals(expected, deliveredTime(written.get("text").asText()), written.toString());
+        }
+    }
+
+    @Test
+    void replaysTheSdkEnvelopeTimesVectorAtNanosecondPrecision() throws Exception {
+        JsonNode vectors = Vectors.read("plugin/sdk-envelope-times.json");
+        assertEquals(9, vectors.get("precisions").get(PRECISION).asInt(), "Instant writes up to nine fraction digits");
+        // writing：按投递时读宿主文本的读法构造时刻（Instant 不带偏移，原文的偏移在这一步换算成 UTC），经发布时的写出路径写成文本
+        for (JsonNode writing : vectors.get("writing")) {
+            JsonNode instant = writing.get("instant");
+            Envelope.Builder builder = envelope();
+            if (!instant.isNull()) {
+                builder.time(Wire.parseTimestamp(instant.asText())
+                        .orElseThrow(() -> new AssertionError("'" + instant.asText() + "' should be read")));
+            }
+            String written = Wire.envelope(builder.build()).getTime();
+            assertEquals(writing.get("text").get(PRECISION).asText(), written, writing.get("name").asText());
+        }
+        // reading：经投递的读入路径读宿主写来的文本，与九位小数的 UTC 时刻比较
+        for (JsonNode reading : vectors.get("reading")) {
+            Instant expected = Instant.parse(reading.get("utc").get(PRECISION).asText());
+            assertEquals(Optional.of(expected), deliveredTime(reading.get("text").asText()), reading.get("name").asText());
+        }
+        // unreadable：一条也读不出，投递以 InvalidArgument 拒绝（PluginCallsTest 经 gRPC 核对同一份文本）
+        for (JsonNode unreadable : vectors.get("unreadable")) {
+            assertEquals(Optional.empty(), delivered(unreadable.get("text").asText(), ""), unreadable.get("name").asText());
         }
     }
 
