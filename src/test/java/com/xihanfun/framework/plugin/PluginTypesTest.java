@@ -172,12 +172,12 @@ class PluginTypesTest {
         // deadlines.json：Instant 精确到纳秒，比较时不截断（invocation.md §2）
         JsonNode vectors = Vectors.read("plugin/deadlines.json");
         for (JsonNode valid : vectors.get("valid")) {
-            assertEquals(Optional.of(Instant.parse(valid.get("utc").asText())), Wire.parseDeadline(valid.get("text").asText()), valid.toString());
+            assertEquals(Optional.of(Instant.parse(valid.get("utc").asText())), Wire.parseTimestamp(valid.get("text").asText()), valid.toString());
         }
         for (String invalid : Vectors.strings(vectors.get("invalid"))) {
-            assertEquals(Optional.empty(), Wire.parseDeadline(invalid), invalid);
+            assertEquals(Optional.empty(), Wire.parseTimestamp(invalid), invalid);
         }
-        assertEquals(Optional.empty(), Wire.parseDeadline(""));
+        assertEquals(Optional.empty(), Wire.parseTimestamp(""));
         for (JsonNode effective : vectors.get("effective")) {
             Optional<Instant> grpc = effective.get("grpc").isNull() ? Optional.empty() : Optional.of(Instant.parse(effective.get("grpc").asText()));
             Optional<Instant> expected = effective.get("expected").isNull() ? Optional.empty() : Optional.of(Instant.parse(effective.get("expected").asText()));
@@ -189,7 +189,7 @@ class PluginTypesTest {
         assertEquals("2026-11-18T03:25:00.1234567+00:00", Wire.formatDeadline(Instant.parse("2026-11-18T03:25:00.123456789Z")),
                 "finer digits are truncated, not rounded");
         assertEquals("9999-12-31T23:59:59.9999999+00:00", Wire.formatDeadline(Instant.MAX), "far deadlines stay readable");
-        assertTrue(Wire.parseDeadline(Wire.formatDeadline(Instant.MAX)).isPresent());
+        assertTrue(Wire.parseTimestamp(Wire.formatDeadline(Instant.MAX)).isPresent());
     }
 
     @Test

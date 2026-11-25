@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -251,7 +252,42 @@ class PluginCallsTest {
             StatusRuntimeException missing = assertThrows(StatusRuntimeException.class,
                     () -> plugin.stub().handleEvent(RunningPlugin.eventRequest("samples.events", "x", "competing").toBuilder().clearEnvelope().build()));
             assertEquals(Status.Code.INVALID_ARGUMENT, missing.getStatus().getCode());
+            // 宿主写来的 time 读不出：不交给作者，也不当作没有时间；先于找订阅（invocation.md §4）
+            for (String topic : List.of("samples.events", "samples.nobody")) {
+                StatusRuntimeException badTime = assertThrows(StatusRuntimeException.class, () -> plugin.stub()
+                        .handleEvent(withEnvelope(RunningPlugin.eventRequest(topic, "x", "competing"), "2026-11-25T03:25:00", "")));
+                assertEquals(Status.Code.INVALID_ARGUMENT, badTime.getStatus().getCode(), topic);
+            }
+            assertEquals(List.of(), received, "an envelope whose time cannot be read reaches no handler");
         }
+    }
+
+    @Test
+    void deliveredEnvelopesCarryTheTimeInUtcAndTheDataSchemaAsIs() throws Exception {
+        List<Envelope> received = new CopyOnWriteArrayList<>();
+        PluginOptions.Builder options = PluginOptions.builder().subscribe(Subscription.of("samples.events"), (context, envelope, attempt) -> {
+            received.add(envelope);
+            return Result.success();
+        });
+        try (RunningPlugin plugin = RunningPlugin.start(directory, options)) {
+            plugin.handshake();
+            assertTrue(plugin.configure("{}").getStatus().getOk());
+            assertTrue(plugin.stub().start(PluginProto.StartRequest.getDefaultInstance()).getStatus().getOk());
+            PluginProto.HandleEventRequest request = RunningPlugin.eventRequest("samples.events", "samples.created", "competing");
+            String schema = " https://example.com/schemas/order.json ";
+            assertTrue(plugin.stub().handleEvent(withEnvelope(request, "2026-11-25T11:25:00.1234567+08:00", schema)).getStatus().getOk());
+            assertTrue(plugin.stub().handleEvent(request).getStatus().getOk());
+        }
+        assertEquals(2, received.size());
+        // 换算成 UTC；dataschema 原样、不裁剪；空串是没有
+        assertEquals(Optional.of(Instant.parse("2026-11-25T03:25:00.1234567Z")), received.get(0).time());
+        assertEquals(Optional.of(" https://example.com/schemas/order.json "), received.get(0).dataSchema());
+        assertEquals(Optional.empty(), received.get(1).time());
+        assertEquals(Optional.empty(), received.get(1).dataSchema());
+    }
+
+    private static PluginProto.HandleEventRequest withEnvelope(PluginProto.HandleEventRequest request, String time, String dataSchema) {
+        return request.toBuilder().setEnvelope(request.getEnvelope().toBuilder().setTime(time).setDataSchema(dataSchema)).build();
     }
 
     private static void assertUnsubscribed(PluginProto.Status status, String topic, String type, String mode) {

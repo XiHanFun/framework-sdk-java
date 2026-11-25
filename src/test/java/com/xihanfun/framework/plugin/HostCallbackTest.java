@@ -40,6 +40,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -88,6 +89,9 @@ class HostCallbackTest {
     /** 请求：发布这些主题，各带可选的 {@code xihantenant}；{@code tenant} 不为空时先往上下文里加这个租户。 */
     record Publish(List<String> topics, List<String> tenants, String tenant) {
     }
+
+    /** {@code samples.publish} 发布的第一项信封的时间：东八区的时刻，写出时换算成 UTC。 */
+    private static final Instant PUBLISHED_TIME = OffsetDateTime.parse("2026-11-25T11:25:00.5+08:00").toInstant();
 
     /** 响应：回调的结果。 */
     record Outcome(boolean ok, String code, String key, String details, String payload) {
@@ -238,6 +242,10 @@ class HostCallbackTest {
             List<Envelope> envelopes = new ArrayList<>();
             for (int index = 0; index < request.topics().size(); index++) {
                 Envelope.Builder envelope = Envelope.builder(request.topics().get(index), "m" + index, "urn:test", "samples.created");
+                if (index == 0) {
+                    // 第一项带时间（东八区的时刻）与 dataschema，其余没有
+                    envelope.time(PUBLISHED_TIME).dataSchema("urn:schema:samples");
+                }
                 String tenant = request.tenants().get(index);
                 if (!tenant.isEmpty()) {
                     envelope.extension(Envelope.TENANT_EXTENSION, tenant);
@@ -293,7 +301,7 @@ class HostCallbackTest {
             assertEquals("", sent.getTraceState(), "trace_state is written empty");
             // deadline 用 UTC、七位小数、+00:00；gRPC 截止时间与它相同（invocation.md §2、§5）
             assertTrue(sent.getDeadline().matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{7}\\+00:00"), sent.getDeadline());
-            Instant written = Wire.parseDeadline(sent.getDeadline()).orElseThrow();
+            Instant written = Wire.parseTimestamp(sent.getDeadline()).orElseThrow();
             assertTrue(Math.abs(written.toEpochMilli() - deadlines.get(0).toEpochMilli()) < 1000, written + " vs " + deadlines.get(0));
 
             // 带了宿主没有交给插件的租户：本地拒绝，不发给宿主（invocation.md §5，ADR-0195）
@@ -381,6 +389,9 @@ class HostCallbackTest {
                     batch.results());
             assertEquals(1, published.size(), "the envelopes go to the host in one call");
             assertEquals(3, published.get(0).getEnvelopesCount(), "the envelope's xihantenant is not checked locally");
+            // time 换算成 UTC、以 Z 结尾，dataschema 原样；没有的写空串
+            List<String> written = published.get(0).getEnvelopesList().stream().map(sent -> sent.getTime() + "|" + sent.getDataSchema()).toList();
+            assertEquals(List.of("2026-11-25T03:25:00.5Z|urn:schema:samples", "|", "|"), written);
             assertEquals("t1", published.get(0).getMetadata().getBaggageOrThrow(BaggageKeys.TENANT), "the host builds the context from the metadata");
 
             assertEquals(List.of(), call(plugin, "samples.publish", new Publish(List.of(), List.of(), null), null, Published.class).results());
@@ -625,4 +636,5 @@ class HostCallbackTest {
         assertEquals("", unavailable.getText());
         assertEquals("{\"id\":\"xihan.tests.sample\",\"state\":\"Draining\"}", unavailable.getDetails());
     }
+
 }

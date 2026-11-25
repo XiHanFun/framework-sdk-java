@@ -36,14 +36,14 @@ final class Wire {
     /** 细节按值模型写出：经原语的线上编码，不另写一份数字规则。 */
     private static final ObjectMapper JSON = new ObjectMapper().registerModule(new PrimitivesModule());
 
-    /** 截止时间换算成 UTC 之后（不计小数）允许的最早时刻（{@code invocation.md} §2）。 */
-    private static final Instant MIN_DEADLINE = Instant.parse("0001-01-01T00:00:00Z");
+    /** 时间文本换算成 UTC 之后（不计小数）允许的最早时刻（RFC-0003 规则 8，截止时间与信封的 {@code time} 共用）。 */
+    private static final Instant MIN_TIMESTAMP = Instant.parse("0001-01-01T00:00:00Z");
 
-    /** 截止时间换算成 UTC 之后（不计小数）允许的最晚时刻。 */
-    private static final Instant MAX_DEADLINE = Instant.parse("9999-12-31T23:59:59Z");
+    /** 时间文本换算成 UTC 之后（不计小数）允许的最晚时刻。 */
+    private static final Instant MAX_TIMESTAMP = Instant.parse("9999-12-31T23:59:59Z");
 
-    /** 写出时能表示的最晚时刻：七位小数的最大值。 */
-    private static final Instant MAX_WRITTEN_DEADLINE = MAX_DEADLINE.plusNanos(999_999_900);
+    /** 写出截止时间时能表示的最晚时刻：七位小数的最大值。 */
+    private static final Instant MAX_WRITTEN_DEADLINE = MAX_TIMESTAMP.plusNanos(999_999_900);
 
     /** 写出截止时间的固定偏移（.NET 的 {@code O} 格式在 UTC 时的写法）。 */
     private static final String UTC_OFFSET = "+00:00";
@@ -263,11 +263,11 @@ final class Wire {
     }
 
     /**
-     * 生效的截止时间（{@code invocation.md} §2）：{@code metadata} 按 {@link #parseDeadline(String)} 读、读不出当作没有，与 gRPC 调用自身的截止时间
+     * 生效的截止时间（{@code invocation.md} §2）：{@code metadata} 按 {@link #parseTimestamp(String)} 读、读不出当作没有，与 gRPC 调用自身的截止时间
      * 取较早的一个；两者都没有时没有截止时间。
      */
     static Optional<Instant> effectiveDeadline(String metadata, Optional<Instant> transport) {
-        Optional<Instant> declared = parseDeadline(metadata);
+        Optional<Instant> declared = parseTimestamp(metadata);
         if (declared.isPresent() && transport.isPresent()) {
             return Optional.of(transport.get().isBefore(declared.get()) ? transport.get() : declared.get());
         }
@@ -275,14 +275,15 @@ final class Wire {
     }
 
     /**
-     * 严格读 {@code InvocationMetadata.deadline}（{@code invocation.md} §2）：
+     * 按 RFC-0003 规则 8 严格读时间文本：{@code InvocationMetadata.deadline}（{@code invocation.md} §2）与 {@code Envelope.time}（§4，RFC-0009「信封」
+     * 第 3 条）共用这条文法，
      * {@code ^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?([Zz]|[+-][0-9]{2}:[0-9]{2})\z}，
      * 年 0001–9999、月日按公历（含闰年）、时 00–23、分 00–59、秒 00–59（不认闰秒）、偏移的时 00–23 与分 00–59，
      * 换算成 UTC 之后（不计小数）在 {@code 0001-01-01T00:00:00} 到 {@code 9999-12-31T23:59:59} 之间。{@link Instant} 精确到纳秒，九位小数不必截断。
      *
      * @return UTC 时刻；空串、{@code null} 或读不出时为空
      */
-    static Optional<Instant> parseDeadline(String text) {
+    static Optional<Instant> parseTimestamp(String text) {
         // 固定部分 yyyy-MM-ddTHH:mm:ss 是 19 个字符，之后至少还有一个字符的偏移
         if (text == null || text.length() < 20 || text.charAt(4) != '-' || text.charAt(7) != '-'
                 || (text.charAt(10) != 'T' && text.charAt(10) != 't') || text.charAt(13) != ':' || text.charAt(16) != ':') {
@@ -332,7 +333,7 @@ final class Wire {
         }
         // 范围按换算成 UTC 之后、不计小数的时刻判定，所以 9999-12-31T23:59:59.999999999Z 仍然合法
         Instant utc = LocalDateTime.of(year, month, day, hour, minute, second).toInstant(ZoneOffset.UTC).minusSeconds(offset);
-        if (utc.isBefore(MIN_DEADLINE) || utc.isAfter(MAX_DEADLINE)) {
+        if (utc.isBefore(MIN_TIMESTAMP) || utc.isAfter(MAX_TIMESTAMP)) {
             return Optional.empty();
         }
         return Optional.of(utc.plusNanos(nanos));
@@ -343,7 +344,8 @@ final class Wire {
      * 不进位，小数不足七位补零。超出 {@code 0001}–{@code 9999} 年的时刻夹到这个范围的两端，写出的文本总能被对方读出。
      */
     static String formatDeadline(Instant deadline) {
-        Instant clamped = deadline.isBefore(MIN_DEADLINE) ? MIN_DEADLINE : deadline.isAfter(MAX_WRITTEN_DEADLINE) ? MAX_WRITTEN_DEADLINE : deadline;
+        Instant clamped = deadline.isBefore(MIN_TIMESTAMP) ? MIN_TIMESTAMP
+                : deadline.isAfter(MAX_WRITTEN_DEADLINE) ? MAX_WRITTEN_DEADLINE : deadline;
         OffsetDateTime utc = clamped.atOffset(ZoneOffset.UTC);
         return String.format(Locale.ROOT, "%04d-%02d-%02dT%02d:%02d:%02d.%07d%s", utc.getYear(), utc.getMonthValue(),
                 utc.getDayOfMonth(), utc.getHour(), utc.getMinute(), utc.getSecond(), utc.getNano() / 100, UTC_OFFSET);
@@ -373,7 +375,33 @@ final class Wire {
 
     // ---- 信封与健康 ----
 
-    static Envelope envelope(PluginProto.Envelope envelope) {
+    /**
+     * 按 RFC 3339 写出信封的 {@code time}（RFC-0009「信封」第 3 条）：换算成 UTC、以 {@code Z} 结尾，秒的小数去掉末尾的 0，全为 0 时不写小数点，
+     * 最多九位，如 {@code 2026-11-25T03:25:00.5Z}；六个 SDK 对同一时刻写出同一份文本（精度以内）。年份按四位补零，范围由 {@link Envelope.Builder#time}
+     * 核对过。
+     */
+    static String formatTime(Instant time) {
+        OffsetDateTime utc = time.atOffset(ZoneOffset.UTC);
+        String text = String.format(Locale.ROOT, "%04d-%02d-%02dT%02d:%02d:%02d", utc.getYear(), utc.getMonthValue(), utc.getDayOfMonth(),
+                utc.getHour(), utc.getMinute(), utc.getSecond());
+        if (utc.getNano() == 0) {
+            return text + "Z";
+        }
+        String fraction = String.format(Locale.ROOT, "%09d", utc.getNano());
+        int end = fraction.length();
+        while (fraction.charAt(end - 1) == '0') {
+            end--;
+        }
+        return text + "." + fraction.substring(0, end) + "Z";
+    }
+
+    /**
+     * 把宿主写来的信封读成 SDK 的类型（{@code invocation.md} §4）：{@code time} 按 {@link #parseTimestamp(String)} 读成 UTC 时刻，{@code dataschema}
+     * 原样，两者的空串都是没有。
+     *
+     * @return 信封；{@code time} 不合 RFC-0003 规则 8 时为空
+     */
+    static Optional<Envelope> envelope(PluginProto.Envelope envelope) {
         Envelope.Builder builder = Envelope.builder(envelope.getTopic(), envelope.getId(), envelope.getSource(), envelope.getType())
                 .data(envelope.getData().toByteArray())
                 .extensions(envelope.getExtensionsMap());
@@ -384,7 +412,11 @@ final class Wire {
             builder.subject(envelope.getSubject());
         }
         if (!envelope.getTime().isEmpty()) {
-            builder.time(envelope.getTime());
+            Optional<Instant> time = parseTimestamp(envelope.getTime());
+            if (time.isEmpty()) {
+                return Optional.empty();
+            }
+            builder.time(time.get());
         }
         if (!envelope.getDataContentType().isEmpty()) {
             builder.dataContentType(envelope.getDataContentType());
@@ -392,7 +424,7 @@ final class Wire {
         if (!envelope.getDataSchema().isEmpty()) {
             builder.dataSchema(envelope.getDataSchema());
         }
-        return builder.build();
+        return Optional.of(builder.build());
     }
 
     static PluginProto.Envelope envelope(Envelope envelope) {
@@ -406,7 +438,7 @@ final class Wire {
                 .setData(ByteString.copyFrom(envelope.data()))
                 .putAllExtensions(envelope.extensions());
         envelope.subject().ifPresent(builder::setSubject);
-        envelope.time().ifPresent(builder::setTime);
+        envelope.time().map(Wire::formatTime).ifPresent(builder::setTime);
         envelope.dataSchema().ifPresent(builder::setDataSchema);
         return builder.build();
     }

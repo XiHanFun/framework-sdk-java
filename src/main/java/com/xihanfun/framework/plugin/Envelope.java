@@ -1,6 +1,7 @@
 package com.xihanfun.framework.plugin;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
@@ -12,7 +13,10 @@ import java.util.TreeMap;
  *
  * <p>不可变：{@link #data()} 返回副本。扩展属性的名字原样保留，例如租户在 {@code xihantenant} 里。
  *
- * <p>{@link #dataSchema()} 是 CloudEvents 的 {@code dataschema}（ADR-0305），收到与发布都原样，SDK 不核对、不改写；线上的空串是没有。
+ * <p>{@link #time()} 是 {@link Instant}（精确到纳秒）。发布时写成 RFC 3339 的 UTC 文本：以 {@code Z} 结尾，秒的小数去掉末尾的 0，全为 0 时不写小数点，
+ * 最多九位，如 {@code 2026-11-25T03:25:00.5Z}；收到的信封里，宿主写来的文本按 RFC-0003 规则 8 读成 {@link Instant}（{@code invocation.md} §4），
+ * 规则 8 的小数最多九位，不会超出 {@link Instant} 的精度。{@link #dataSchema()} 是 CloudEvents 的 {@code dataschema}（ADR-0305），收到与发布都原样，
+ * SDK 不核对、不改写；线上的空串是没有。
  */
 public final class Envelope {
     /** CloudEvents 的规范版本。 */
@@ -24,13 +28,19 @@ public final class Envelope {
     /** 承载租户的扩展属性（RFC-0009「信封」）。 */
     public static final String TENANT_EXTENSION = "xihantenant";
 
+    /** {@code time} 能写成四位年份的最早时刻（RFC-0003 规则 8）。 */
+    private static final Instant MIN_TIME = Instant.parse("0001-01-01T00:00:00Z");
+
+    /** {@code time} 能写成四位年份的最晚时刻。 */
+    private static final Instant MAX_TIME = Instant.parse("9999-12-31T23:59:59.999999999Z");
+
     private final String topic;
     private final String id;
     private final String source;
     private final String type;
     private final String specVersion;
     private final String subject;
-    private final String time;
+    private final Instant time;
     private final String dataContentType;
     private final String dataSchema;
     private final byte[] data;
@@ -118,11 +128,11 @@ public final class Envelope {
     }
 
     /**
-     * 返回 {@code time}（RFC 3339）。
+     * 返回 {@code time}。
      *
-     * @return 时间；没有时为空
+     * @return 时刻；没有时为空
      */
-    public Optional<String> time() {
+    public Optional<Instant> time() {
         return Optional.ofNullable(time);
     }
 
@@ -225,7 +235,7 @@ public final class Envelope {
         private final String type;
         private String specVersion = SPEC_VERSION;
         private String subject;
-        private String time;
+        private Instant time;
         private String dataContentType = JSON_CONTENT_TYPE;
         private String dataSchema;
         private byte[] data = new byte[0];
@@ -261,13 +271,23 @@ public final class Envelope {
         }
 
         /**
-         * 设置 {@code time}（RFC 3339）。
+         * 设置 {@code time}。
          *
-         * @param value 时间
+         * <p>发布时换算成 UTC 写成 RFC 3339（见 {@link Envelope}）；RFC 3339 的年份是四位，所以时刻要在 {@code 0001-01-01T00:00:00Z} 到
+         * {@code 9999-12-31T23:59:59.999999999Z} 之间。
+         *
+         * @param value 时刻
          * @return 本构建器
+         * @throws IllegalArgumentException 时刻不在上面的范围里
          */
-        public Builder time(String value) {
-            this.time = Objects.requireNonNull(value, "value");
+        public Builder time(Instant value) {
+            Objects.requireNonNull(value, "value");
+            // 不夹到范围的两端：那会悄悄改掉作者给的时刻
+            if (value.isBefore(MIN_TIME) || value.isAfter(MAX_TIME)) {
+                throw new IllegalArgumentException(
+                        "The envelope time '" + value + "' is outside 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z.");
+            }
+            this.time = value;
             return this;
         }
 

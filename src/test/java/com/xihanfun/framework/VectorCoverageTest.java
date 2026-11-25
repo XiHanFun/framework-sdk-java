@@ -42,6 +42,8 @@ class VectorCoverageTest {
             "plugin/callback-status.json",
             // PluginTypesTest
             "plugin/deadlines.json",
+            // EnvelopeTest（host 档；SDK 读宿主写来的 time 是同一条文法）
+            "plugin/envelope-times.json",
             // HostCallbackTest
             "plugin/error-reading.json",
             // PluginTypesTest

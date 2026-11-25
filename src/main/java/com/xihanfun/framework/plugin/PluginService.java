@@ -341,9 +341,10 @@ final class PluginService extends PluginGrpc.PluginImplBase {
     // ---- 事件 ----
 
     /**
-     * 投递（{@code invocation.md} §4）依次核对：没有信封或方式不是空、{@code competing}、{@code broadcast} 以 {@code InvalidArgument} 拒绝；
-     * 按（主题，方式，类型）找订阅，一个也没有为 {@code KERNEL_NOTFOUND_001} + {@value PluginMessages#EVENT_UNSUBSCRIBED}；插件不在可服务状态为
-     * {@code PLUGINS_UNAVAILABLE_001}；然后还原上下文，匹配的订阅按声明顺序依次执行，第一个失败即结果。
+     * 投递（{@code invocation.md} §4）依次核对：没有信封或方式不是空、{@code competing}、{@code broadcast} 以 {@code InvalidArgument} 拒绝，
+     * 信封的 {@code time} 不合 RFC-0003 规则 8 同样以 {@code InvalidArgument} 拒绝；按（主题，方式，类型）找订阅，一个也没有为
+     * {@code KERNEL_NOTFOUND_001} + {@value PluginMessages#EVENT_UNSUBSCRIBED}；插件不在可服务状态为 {@code PLUGINS_UNAVAILABLE_001}；
+     * 然后还原上下文，匹配的订阅按声明顺序依次执行，第一个失败即结果。
      */
     @Override
     public void handleEvent(PluginProto.HandleEventRequest request, StreamObserver<PluginProto.HandleEventResponse> observer) {
@@ -354,7 +355,16 @@ final class PluginService extends PluginGrpc.PluginImplBase {
                     .asRuntimeException());
             return;
         }
-        Envelope envelope = Wire.envelope(request.getEnvelope());
+        // 宿主写来的 time 一律合文法：读不出是宿主的问题，不交给作者，也不当作没有时间
+        Optional<Envelope> decoded = Wire.envelope(request.getEnvelope());
+        if (decoded.isEmpty()) {
+            observer.onError(Status.INVALID_ARGUMENT
+                    .withDescription("The envelope time '" + request.getEnvelope().getTime()
+                            + "' is not an RFC 3339 date-time as RFC-0003 rule 8 reads it.")
+                    .asRuntimeException());
+            return;
+        }
+        Envelope envelope = decoded.get();
         // 只交给以这种方式声明、类型为空或等于信封 type 的订阅，按握手里的声明顺序；找不到时不改交给另一种方式的处理器
         List<EventHandler> handlers = runtime.options.subscriptions().stream()
                 .filter(candidate -> candidate.subscription().accepts(envelope, mode.get()))
