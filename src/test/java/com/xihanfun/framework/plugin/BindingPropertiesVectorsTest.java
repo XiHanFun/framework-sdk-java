@@ -5,18 +5,28 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.DatabindException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.exc.InvalidDefinitionException;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.plugin.v1.PluginProto;
 import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -137,6 +147,85 @@ class BindingPropertiesVectorsTest {
             assertNoSecrets(text, "the text of a binding");
             assertTrue(text.contains("name=db") && text.contains("[Password, empty, password]"), text);
         }
+    }
+
+    /**
+     * 作者自己的设置：里面带着绑定的列表与映射。
+     *
+     * @param pool 一个普通成员
+     * @param bindings 绑定的列表
+     * @param named 按名字放的绑定
+     */
+    record Settings(String pool, List<ResolvedBinding> bindings, Map<String, ResolvedBinding> named) {
+    }
+
+    @Test
+    void jacksonWritesNamesButNoValues() throws Exception {
+        ResolvedBinding binding = new ResolvedBinding("db", "connection:relational", VALUE,
+                Map.of("password", PASSWORD, "Password", TOKEN, "empty", ""));
+        ResolvedBinding cache = new ResolvedBinding("cache", "cache:distributed", VALUE);
+        // 只有绑定名、类型与按升序排列的属性名，没有属性时是空数组（lifecycle.md §7.2）
+        String text = "{\"name\":\"db\",\"type\":\"connection:relational\",\"propertyNames\":[\"Password\",\"empty\",\"password\"]}";
+        String bare = "{\"name\":\"cache\",\"type\":\"cache:distributed\",\"propertyNames\":[]}";
+        ObjectMapper mapper = JsonMapper.builder().build();
+        Map<String, String> written = new LinkedHashMap<>();
+        written.put("a binding", mapper.writeValueAsString(binding));
+        written.put("a list", mapper.writeValueAsString(List.of(binding, cache)));
+        written.put("a map", mapper.writeValueAsString(Map.of("db", binding)));
+        Settings settings = new Settings("4", List.of(binding, cache), Map.of("db", binding));
+        written.put("a record holding bindings", mapper.writeValueAsString(settings));
+        written.put("a tree", mapper.valueToTree(List.of(binding)).toString());
+        written.put("a converted map", mapper.convertValue(binding, Map.class).toString());
+        written.put("an indented text", mapper.writerWithDefaultPrettyPrinter().writeValueAsString(binding));
+        assertEquals(text, written.get("a binding"));
+        assertEquals("[" + text + "," + bare + "]", written.get("a list"));
+        assertEquals("{\"db\":" + text + "}", written.get("a map"));
+        assertEquals("{\"pool\":\"4\",\"bindings\":[" + text + "," + bare + "],\"named\":{\"db\":" + text + "}}",
+                written.get("a record holding bindings"));
+        assertEquals("[" + text + "]", written.get("a tree"));
+
+        // 关掉注解的映射器与带多态类型的映射器同样经过 JsonSerializable
+        ObjectMapper withoutAnnotations = JsonMapper.builder().disable(MapperFeature.USE_ANNOTATIONS).build();
+        written.put("a mapper without annotations", withoutAnnotations.writeValueAsString(binding));
+        assertEquals(text, written.get("a mapper without annotations"));
+        ObjectMapper typed = JsonMapper.builder()
+                .activateDefaultTyping(BasicPolymorphicTypeValidator.builder().allowIfBaseType(Object.class).build(),
+                        ObjectMapper.DefaultTyping.JAVA_LANG_OBJECT)
+                .build();
+        written.put("a typed mapper", typed.writeValueAsString(Map.<String, Object>of("db", binding)));
+        assertEquals("{\"db\":[\"" + ResolvedBinding.class.getName() + "\"," + text + "]}", written.get("a typed mapper"));
+
+        // PluginConfiguration 没有 Jackson 认得的属性：缺省的映射器拒绝写它，放开空对象时写出 {}，都不带值
+        PluginConfiguration configuration = new PluginConfiguration("{}", List.of(), List.of(binding), Optional.empty());
+        assertThrows(InvalidDefinitionException.class, () -> mapper.writeValueAsString(configuration));
+        written.put("a configuration", JsonMapper.builder().disable(SerializationFeature.FAIL_ON_EMPTY_BEANS).build()
+                .writeValueAsString(configuration));
+        assertEquals("{}", written.get("a configuration"));
+        for (Map.Entry<String, String> entry : written.entrySet()) {
+            assertNoSecrets(entry.getValue(), "the JSON of " + entry.getKey());
+        }
+
+        // 与 TypeScript SDK 的 toJSON 同样的文本：紧凑写法，成员依次是 name、type、propertyNames，属性名按升序
+        ResolvedBinding shared = new ResolvedBinding("db", "connection:relational", VALUE, Map.of("username", "app", "password", PASSWORD));
+        assertEquals("{\"name\":\"db\",\"type\":\"connection:relational\",\"propertyNames\":[\"password\",\"username\"]}",
+                mapper.writeValueAsString(shared));
+
+        // 遮过的文本读不回绑定：少了主值，按记录的规范构造读入失败
+        assertThrows(DatabindException.class, () -> mapper.readValue(text, ResolvedBinding.class));
+    }
+
+    @Test
+    void thePluginLoggerWritesBindingsWithoutValues() {
+        // 运行时的 JSON 行日志把不是字符串、数字与布尔的属性写成 toString()：绑定、绑定的列表与配置都只带名字、类型与属性名
+        ResolvedBinding binding = new ResolvedBinding("db", "connection:relational", VALUE,
+                Map.of("password", PASSWORD, "Password", TOKEN, "empty", ""));
+        PluginConfiguration configuration = new PluginConfiguration("{}", List.of(), List.of(binding), Optional.empty());
+        ByteArrayOutputStream target = new ByteArrayOutputStream();
+        PluginLogger.of(target, PluginLogger.Level.INFORMATION).with("binding", binding)
+                .information("configured", Map.of("bindings", List.of(binding), "configuration", configuration));
+        String line = target.toString(StandardCharsets.UTF_8);
+        assertNoSecrets(line, "the plugin log line");
+        assertTrue(line.contains("name=db") && line.contains("[Password, empty, password]"), line);
     }
 
     @Test
