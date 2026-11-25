@@ -40,7 +40,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * 没有能连的端点时每次回调都以 {@code PLUGINS_UNAVAILABLE_001} + {@value PluginMessages#HOST_UNAVAILABLE} 失败、不发请求（{@code handshake.md} §4）。
  * 发出之前在本地按宿主的顺序核对，与宿主给出同样的错误：所需权限既在清单 {@code permissions} 里、也在 {@code Configure} 授予的权限里；
  * 上下文的租户是宿主此刻交给插件、还在处理的某个调用或投递的租户（ADR-0195）；然后，上下文的截止时间已过或已被取消时也不发请求；
- * {@code Host.Invoke} 最后还核对以 JSON 文本给出的载荷编得成 UTF-8（ADR-0312）。每次回调都带会话令牌，元数据取自所在的调用上下文
+ * {@code Host.Invoke} 最后还核对以 JSON 文本给出的载荷编得成 UTF-8（ADR-0312），{@code Host.Publish} 最后逐项核对以文本给出的 {@code data}
+ * 编得成 UTF-8（ADR-0315）。每次回调都带会话令牌，元数据取自所在的调用上下文
  * （追踪、截止时间、已登记的 Baggage），gRPC 调用的截止时间与之相同，取消上下文即取消回调。线程安全；连接在第一次回调时建立。
  */
 public final class Host {
@@ -77,6 +78,15 @@ public final class Host {
 
     /** 没有可用的回调端点时 {@code reason} 的固定文本（{@code plugin-messages.json}）。 */
     static final String NO_ENDPOINT = "no supported callback endpoint";
+
+    /** 信封不合法或无法转换的错误码（{@code conventions/error-codes.md}），与宿主转换不了信封时相同。 */
+    static final String ENVELOPE_INVALID = "MESSAGING_VALIDATION_002";
+
+    /** 信封不合法的消息键（RFC-0009），参数 {@code reason}。 */
+    static final String ENVELOPE_INVALID_KEY = "messaging.envelope.invalid";
+
+    /** 以文本设置的 {@code data} 编不成 UTF-8 时 {@code reason} 的固定文本（{@code invocation.md} §5，ADR-0315）。 */
+    static final String UNENCODABLE_DATA = "the data has a lone surrogate and cannot be encoded as UTF-8";
 
     /** gRPC 状态码 0–16 的 PascalCase 名字（{@code invocation.md} §3），下标即状态码；grpc-java 的枚举名是大写下划线，不能直接用。 */
     private static final List<String> STATUS_NAMES = List.of("OK", "Cancelled", "Unknown", "InvalidArgument", "DeadlineExceeded", "NotFound",
@@ -187,9 +197,12 @@ public final class Host {
     /**
      * 经宿主的消息代理发布一批消息，逐项结果与入参顺序一一对应（批量优先，{@code conventions/batch-first.md}）。
      *
-     * <p>空集合不发给宿主。权限与上下文租户的本地核对是整批的结果：不通过时每一项都是那个错误，一项也不发。信封的 {@code xihantenant}
-     * 不在本地核对，由宿主逐项判定（宿主在它之前还核对发布器与主题，本地先判它会改变错误的先后）。整批的传输失败使每一项都得到同一个错误；
-     * 宿主返回的结果数与信封数不同时每一项都是 {@code PLUGINS_UNEXPECTED_001}。
+     * <p>空集合不发给宿主。端点、权限、上下文租户与截止时间的本地核对是整批的结果：不通过时每一项都是那个错误，一项也不发。之后逐项核对以文本
+     * 设置的 {@code data}（{@link Envelope#hasUnencodableData()}，ADR-0315）：编不成 UTF-8 的那一项不发出，结果是 {@code MESSAGING_VALIDATION_002}
+     * + {@code messaging.envelope.invalid}（{@code reason} 为 {@code the data has a lone surrogate and cannot be encoded as UTF-8}），
+     * 其余各项照常组成一次请求，结果放回各自原来的位置；每一项都编不成时不发请求（{@code invocation.md} §5）。信封的 {@code xihantenant} 不在本地核对，由宿主逐项判定（宿主在它之前还核对发布器
+     * 与主题，本地先判它会改变错误的先后）。整批的传输失败使发出的每一项都得到同一个错误；宿主返回的结果数与发出的信封数不同时发出的每一项都是
+     * {@code PLUGINS_UNEXPECTED_001}。
      *
      * @param context 调用上下文；宿主以它的元数据建调用上下文，补齐信封缺的扩展属性
      * @param envelopes 信封；每个信封的主题必须非空，否则宿主对该项返回 {@code MESSAGING_VALIDATION_002}
@@ -205,19 +218,39 @@ public final class Host {
         if (refused.isPresent()) {
             return every(items.size(), Result.fail(refused.get()));
         }
+        // 宿主转换信封是它逐项核对的最后一步，所以排在整批的核对之后：编不成的那一项先占好自己的位置，其余的按原来的先后发出
+        List<Result<Unit>> results = new ArrayList<>(Collections.nCopies(items.size(), null));
+        List<Integer> sent = new ArrayList<>(items.size());
         PluginProto.PublishRequest.Builder request = PluginProto.PublishRequest.newBuilder().setMetadata(Wire.metadata(context));
-        items.forEach(envelope -> request.addEnvelopes(Wire.envelope(envelope)));
+        for (int index = 0; index < items.size(); index++) {
+            Envelope envelope = items.get(index);
+            if (envelope.hasUnencodableData()) {
+                results.set(index, Result.fail(unencodableData()));
+            } else {
+                sent.add(index);
+                request.addEnvelopes(Wire.envelope(envelope));
+            }
+        }
+        if (sent.isEmpty()) {
+            return results;
+        }
         Result<PluginProto.PublishResponse> response = call(context, RPC_PUBLISH, RPC_PUBLISH, stub -> stub.publish(request.build()));
         if (response.isFailed()) {
-            return every(items.size(), Result.fail(response.error().orElseThrow()));
+            Result<Unit> failed = Result.fail(response.error().orElseThrow());
+            sent.forEach(index -> results.set(index, failed));
+            return results;
         }
+        // 宿主只看到发出的信封，结果数按发出的核对
         List<PluginProto.Status> statuses = response.orElseThrow().getResultsList();
-        if (statuses.size() != items.size()) {
-            return every(items.size(), Result.fail(wire.failed(RPC_PUBLISH,
-                    "the host returned " + statuses.size() + " results for " + items.size() + " envelopes")));
+        if (statuses.size() != sent.size()) {
+            Result<Unit> mismatch = Result.fail(wire.failed(RPC_PUBLISH,
+                    "the host returned " + statuses.size() + " results for " + sent.size() + " envelopes"));
+            sent.forEach(index -> results.set(index, mismatch));
+            return results;
         }
-        List<Result<Unit>> results = new ArrayList<>(items.size());
-        statuses.forEach(status -> results.add(wire.readStatus(status, RPC_PUBLISH)));
+        for (int position = 0; position < sent.size(); position++) {
+            results.set(sent.get(position), wire.readStatus(statuses.get(position), RPC_PUBLISH));
+        }
         return results;
     }
 
@@ -234,6 +267,11 @@ public final class Host {
         } finally {
             lock.unlock();
         }
+    }
+
+    /** 以文本设置的 {@code data} 编不成 UTF-8 的那一项的错误：与宿主转换不了信封时同一个码与键（{@code invocation.md} §5，ADR-0315）。 */
+    private static Error unencodableData() {
+        return Error.validation(ENVELOPE_INVALID, ENVELOPE_INVALID_KEY, Map.of("reason", UNENCODABLE_DATA));
     }
 
     private static List<Result<Unit>> every(int count, Result<Unit> result) {

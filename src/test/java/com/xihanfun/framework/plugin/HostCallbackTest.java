@@ -102,6 +102,28 @@ class HostCallbackTest {
     record Publish(List<String> topics, List<String> tenants, String tenant) {
     }
 
+    /**
+     * 请求：发布这些主题，各以文本设置 {@code data}（见 {@link #publishedText}）；{@code state} 为 {@code expired} 或 {@code cancelled} 时
+     * 上下文先到截止时间或先被取消，{@code tenant} 不为空时先往上下文里加这个租户。
+     */
+    record PublishText(List<String> topics, List<String> texts, String state, String tenant) {
+    }
+
+    /**
+     * {@link PublishText} 里各项的文本：{@code high}、{@code low}、{@code reversed}（颠倒的一对）与 {@code trailing}（末尾的高代理项，
+     * 后面没有低代理项）是孤立的代理项，{@code pair} 是成对的代理项，其余是普通文本。
+     */
+    static String publishedText(String text) {
+        return switch (text) {
+            case "high" -> "{\"title\":\"" + (char) 0xD800 + "\"}";
+            case "low" -> "{\"title\":\"" + (char) 0xDC00 + "\"}";
+            case "reversed" -> "{\"title\":\"" + (char) 0xDC00 + (char) 0xD800 + "\"}";
+            case "trailing" -> "{\"title\":\"x" + (char) 0xDBFF;
+            case "pair" -> "{\"title\":\"" + new String(Character.toChars(0x1F600)) + "\"}";
+            default -> "{\"title\":\"plain\"}";
+        };
+    }
+
     /** {@code samples.publish} 发布的第一项信封的时间：东八区的时刻，写出时换算成 UTC。 */
     private static final Instant PUBLISHED_TIME = OffsetDateTime.parse("2026-11-25T11:25:00.5+08:00").toInstant();
 
@@ -287,6 +309,24 @@ class HostCallbackTest {
             List<Outcome> results = new ArrayList<>();
             Host.of(call).orElseThrow().publish(call, envelopes).forEach(result -> results.add(Outcome.of(result, "")));
             return Result.ok(new Published(results));
+        });
+        registry.add(OperationContract.of("samples.publish-text"), PublishText.class, Published.class, (context, request) -> {
+            Context call = request.tenant() == null ? context : context.withBaggage(BaggageKeys.TENANT, request.tenant());
+            List<Envelope> envelopes = new ArrayList<>();
+            for (int index = 0; index < request.topics().size(); index++) {
+                envelopes.add(Envelope.builder(request.topics().get(index), "m" + index, "urn:test", "samples.created")
+                        .data(publishedText(request.texts().get(index))).build());
+            }
+            CancellableContext scope = "expired".equals(request.state()) ? call.withTimeout(Duration.ZERO) : call.withCancellation();
+            try (scope) {
+                if ("cancelled".equals(request.state())) {
+                    scope.cancel();
+                }
+                List<Outcome> results = new ArrayList<>();
+                Host host = Host.of(scope.context()).orElseThrow();
+                host.publish(scope.context(), envelopes).forEach(result -> results.add(Outcome.of(result, "")));
+                return Result.ok(new Published(results));
+            }
         });
         return registry;
     }
@@ -515,6 +555,74 @@ class HostCallbackTest {
                     call(plugin, "samples.text", new Text("orders.create", "high", null, null), null, Outcome.class).key());
         }
         assertEquals(1, sessions.size());
+    }
+
+    @Test
+    void anEnvelopeWhoseTextDataCannotBeEncodedFailsAloneAndTheRestArePublished() throws Exception {
+        // invocation.md §5（ADR-0315）：以字符串给出的 data 发出前严格编码成 UTF-8，编不成的那一项不发出，其余照常组成一次请求、结果放回原位
+        Outcome invalid = new Outcome(false, "MESSAGING_VALIDATION_002", "messaging.envelope.invalid",
+                "{\"reason\":\"the data has a lone surrogate and cannot be encoded as UTF-8\"}", "");
+        Outcome ok = new Outcome(true, "", "", "", "");
+        try (RunningPlugin plugin = start(hostAddress())) {
+            List<String> texts = List.of("plain", "high", "pair", "low", "reversed", "trailing");
+            List<String> topics = List.of("samples.a", "samples.b", "samples.c", "samples.d", "samples.e", "samples.f");
+            Published batch = call(plugin, "samples.publish-text", new PublishText(topics, texts, null, null), null, Published.class);
+            assertEquals(List.of(ok, invalid, ok, invalid, invalid, invalid), batch.results(), "each result stays in its own position");
+            assertEquals(1, published.size(), "the encodable envelopes go to the host in one call");
+            List<PluginProto.Envelope> sent = published.get(0).getEnvelopesList();
+            assertEquals(List.of("samples.a", "samples.c"), sent.stream().map(PluginProto.Envelope::getTopic).toList());
+            // 成对的代理项是一个字符：照常发出，宿主收到它的 UTF-8
+            assertEquals(List.of(ByteString.copyFromUtf8(publishedText("plain")), ByteString.copyFromUtf8(publishedText("pair"))),
+                    sent.stream().map(PluginProto.Envelope::getData).toList());
+
+            // 每一项都编不成：不发请求
+            List<String> two = List.of("samples.a", "samples.b");
+            PublishText nothing = new PublishText(two, List.of("high", "trailing"), null, null);
+            assertEquals(List.of(invalid, invalid), call(plugin, "samples.publish-text", nothing, null, Published.class).results());
+            assertEquals(1, published.size(), "a batch with nothing encodable does not reach the host");
+
+            // 宿主只看到发出的信封：结果数按发出的核对，传输失败也只落在发出的那几项上
+            Outcome mismatch = new Outcome(false, PluginErrors.UNEXPECTED, PluginMessages.FAILED,
+                    "{\"id\":\"xihan.tests.sample\",\"phase\":\"publish\",\"reason\":\"the host returned 0 results for 1 envelopes\"}", "");
+            assertEquals(List.of(invalid, mismatch), call(plugin, "samples.publish-text",
+                    new PublishText(List.of("samples.a", "short"), List.of("low", "plain"), null, null), null, Published.class).results());
+            Outcome failed = new Outcome(false, PluginErrors.UNEXPECTED, PluginMessages.FAILED,
+                    "{\"id\":\"xihan.tests.sample\",\"phase\":\"publish\",\"reason\":\"Internal: boom\"}", "");
+            PublishText failing = new PublishText(List.of("fail.rpc", "samples.b"), List.of("plain", "reversed"), null, null);
+            assertEquals(List.of(failed, invalid), call(plugin, "samples.publish-text", failing, null, Published.class).results());
+            assertEquals(3, published.size());
+            assertEquals(List.of(1, 1), published.subList(1, 3).stream().map(PluginProto.PublishRequest::getEnvelopesCount).toList());
+
+            // 先后：租户、截止时间与取消先失败的仍报它们，每一项都是整批的那个错误
+            Outcome tenantDenied = new Outcome(false, PluginErrors.CALLBACK_DENIED, PluginMessages.CALLBACK_TENANT_DENIED,
+                    "{\"id\":\"xihan.tests.sample\",\"tenant\":\"t2\"}", "");
+            List<String> mixed = List.of("high", "plain");
+            assertEquals(List.of(tenantDenied, tenantDenied),
+                    call(plugin, "samples.publish-text", new PublishText(two, mixed, null, "t2"), "t1", Published.class).results());
+            Outcome expired = new Outcome(false, "KERNEL_TIMEOUT_001", "kernel.invocation.deadline_exceeded", "", "");
+            assertEquals(List.of(expired, expired),
+                    call(plugin, "samples.publish-text", new PublishText(two, mixed, "expired", null), null, Published.class).results());
+            Outcome cancelled = new Outcome(false, "KERNEL_CANCELLED_001", "kernel.invocation.cancelled", "", "");
+            assertEquals(List.of(cancelled, cancelled),
+                    call(plugin, "samples.publish-text", new PublishText(two, mixed, "cancelled", null), null, Published.class).results());
+            assertEquals(3, published.size(), "refused batches do not reach the host");
+        }
+        // 端点与权限同样在前
+        PublishText mixed = new PublishText(List.of("samples.a", "samples.b"), List.of("high", "plain"), null, null);
+        Path missing = Files.createDirectories(directory.resolve("missing"));
+        try (RunningPlugin plugin = start(missing, RunningPlugin.MANIFEST, Map.of())) {
+            List<Outcome> results = call(plugin, "samples.publish-text", mixed, null, Published.class).results();
+            assertEquals(List.of(PluginMessages.HOST_UNAVAILABLE, PluginMessages.HOST_UNAVAILABLE),
+                    results.stream().map(Outcome::key).toList());
+        }
+        Path undeclared = Files.createDirectories(directory.resolve("undeclared"));
+        try (RunningPlugin plugin = start(undeclared, RunningPlugin.MANIFEST.replace(", \"capability:messaging.queue\"", ""),
+                Map.of(PluginRuntime.ENV_HOST_ADDRESS, hostAddress()))) {
+            List<Outcome> results = call(plugin, "samples.publish-text", mixed, null, Published.class).results();
+            assertEquals(List.of(PluginMessages.CALLBACK_DENIED, PluginMessages.CALLBACK_DENIED),
+                    results.stream().map(Outcome::key).toList());
+        }
+        assertEquals(3, published.size());
     }
 
     @Test

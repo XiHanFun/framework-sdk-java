@@ -1,7 +1,7 @@
 package com.xihanfun.framework.operation;
 
+import com.xihanfun.framework.internal.GeneralizedUtf8;
 import com.xihanfun.framework.primitives.JsonText;
-import java.io.ByteArrayOutputStream;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -65,33 +65,7 @@ public final class OperationRequest {
         if (utf8.isPresent()) {
             return new OperationRequest(id, utf8.get(), false);
         }
-        return new OperationRequest(id, generalizedUtf8(json), true);
-    }
-
-    /**
-     * 广义 UTF-8（WTF-8）：成对的代理项合成一个码位，孤立的代理项与其余码位一样按 UTF-8 的位模式写成三个字节（{@code ED A0 80} 等）。
-     */
-    private static byte[] generalizedUtf8(String text) {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream(text.length() * 3);
-        // String.codePoints 把成对的代理项合成一个码位，孤立的代理项原样作为一个码位给出
-        text.codePoints().forEach(codePoint -> {
-            if (codePoint < 0x80) {
-                bytes.write(codePoint);
-            } else if (codePoint < 0x800) {
-                bytes.write(0xC0 | (codePoint >> 6));
-                bytes.write(0x80 | (codePoint & 0x3F));
-            } else if (codePoint < 0x10000) {
-                bytes.write(0xE0 | (codePoint >> 12));
-                bytes.write(0x80 | ((codePoint >> 6) & 0x3F));
-                bytes.write(0x80 | (codePoint & 0x3F));
-            } else {
-                bytes.write(0xF0 | (codePoint >> 18));
-                bytes.write(0x80 | ((codePoint >> 12) & 0x3F));
-                bytes.write(0x80 | ((codePoint >> 6) & 0x3F));
-                bytes.write(0x80 | (codePoint & 0x3F));
-            }
-        });
-        return bytes.toByteArray();
+        return new OperationRequest(id, GeneralizedUtf8.encode(json), true);
     }
 
     /**

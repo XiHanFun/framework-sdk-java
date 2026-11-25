@@ -1,6 +1,8 @@
 package com.xihanfun.framework.plugin;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.xihanfun.framework.Vectors;
 import com.xihanfun.framework.plugin.v1.PluginProto;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -178,5 +181,32 @@ class EnvelopeTest {
         Instant time = Instant.parse("2026-11-25T03:25:00Z");
         assertEquals(envelope().time(time).build(), envelope().time(time).build());
         assertNotEquals(envelope().time(time).build(), envelope().time(time.plusNanos(1)).build());
+    }
+
+    @Test
+    void textDataIsEncodedStrictlyAndALoneSurrogateIsKeptForThePublishToRefuse() {
+        // RFC-0001「写出与转交」（ADR-0315）：data(String) 严格编码成 UTF-8；孤立的代理项编不成，不换成 ?，信封照样建得出、留给 Host.publish 拒绝
+        String pair = "{\"title\":\"" + new String(Character.toChars(0x1F600)) + "\"}";
+        Envelope paired = envelope().data(pair).build();
+        assertFalse(paired.hasUnencodableData());
+        assertArrayEquals(pair.getBytes(StandardCharsets.UTF_8), paired.data(), "a surrogate pair is one character");
+        assertEquals(pair, paired.dataText());
+        for (String text : List.of(String.valueOf((char) 0xD800), String.valueOf((char) 0xDC00), "" + (char) 0xDC00 + (char) 0xD800,
+                "x" + (char) 0xDBFF)) {
+            Envelope unencodable = envelope().data(text).build();
+            assertTrue(unencodable.hasUnencodableData(), text);
+            assertNotEquals(envelope().data(text.getBytes(StandardCharsets.UTF_8)).build(), unencodable, "not the bytes with '?' in place");
+        }
+        // 广义 UTF-8：孤立的代理项照位模式写成三个字节，不是合法的 UTF-8
+        assertArrayEquals(new byte[] {'a', (byte) 0xED, (byte) 0xA0, (byte) 0x80}, envelope().data("a" + (char) 0xD800).build().data());
+        // 以字节设置的 data 原样、总是可发：同样的字节也与以文本设置的不相等
+        Envelope bytes = envelope().data(new byte[] {'a', (byte) 0xED, (byte) 0xA0, (byte) 0x80}).build();
+        assertFalse(bytes.hasUnencodableData());
+        assertNotEquals(bytes, envelope().data("a" + (char) 0xD800).build());
+        assertFalse(envelope().data(String.valueOf((char) 0xD800)).data(new byte[] {'{', '}'}).build().hasUnencodableData(),
+                "setting the data again replaces the text");
+        assertTrue(envelope().data(new byte[] {'{', '}'}).data(String.valueOf((char) 0xD800)).build().hasUnencodableData());
+        assertEquals(envelope().data("x" + (char) 0xD800).build(), envelope().data("x" + (char) 0xD800).build());
+        assertEquals(envelope().data("x" + (char) 0xD800).build().hashCode(), envelope().data("x" + (char) 0xD800).build().hashCode());
     }
 }

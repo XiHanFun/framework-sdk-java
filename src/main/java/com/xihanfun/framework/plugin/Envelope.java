@@ -1,5 +1,7 @@
 package com.xihanfun.framework.plugin;
 
+import com.xihanfun.framework.internal.GeneralizedUtf8;
+import com.xihanfun.framework.primitives.JsonText;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Arrays;
@@ -18,6 +20,9 @@ import java.util.TreeMap;
  * 由宿主以 {@code messaging.envelope.invalid_time} 拒绝那一项。收到的信封里，宿主写来的文本按 RFC-0003 规则 8 读成 {@link Instant}
  * （{@code invocation.md} §4），规则 8 的小数最多九位，不会超出 {@link Instant} 的精度。{@link #dataSchema()} 是 CloudEvents 的 {@code dataschema}
  * （ADR-0305），收到与发布都原样，SDK 不核对、不改写；线上的空串是没有。
+ *
+ * <p>以文本设置的 {@code data}（{@link Builder#data(String)}）严格编码成 UTF-8（RFC-0001「写出与转交」，ADR-0315）：文本里有孤立的代理项时
+ * 信封照样建得出，{@link #hasUnencodableData()} 为真，{@link Host#publish} 不发出这一项、在本地让它失败（{@code invocation.md} §5）。
  */
 public final class Envelope {
     /** CloudEvents 的规范版本。 */
@@ -39,6 +44,10 @@ public final class Envelope {
     private final String dataContentType;
     private final String dataSchema;
     private final byte[] data;
+
+    /** 以文本设置的 {@code data} 有孤立的代理项（编不成 UTF-8）。 */
+    private final boolean unencodableData;
+
     private final Map<String, String> extensions;
 
     private Envelope(Builder builder) {
@@ -52,6 +61,7 @@ public final class Envelope {
         this.dataContentType = builder.dataContentType;
         this.dataSchema = builder.dataSchema;
         this.data = builder.data.clone();
+        this.unencodableData = builder.unencodableData;
         this.extensions = Map.copyOf(new TreeMap<>(builder.extensions));
     }
 
@@ -152,16 +162,29 @@ public final class Envelope {
     /**
      * 返回 {@code data}。
      *
-     * @return 数据的副本
+     * @return 数据的副本；{@link #hasUnencodableData()} 为真时是文本的广义 UTF-8（WTF-8）编码，孤立的代理项各占三个字节，不是合法的 UTF-8
      */
     public byte[] data() {
         return data.clone();
     }
 
     /**
+     * 是否以编不成 UTF-8 的文本设置了 {@code data}（ADR-0315）：{@link Builder#data(String)} 的文本里有孤立的代理项时为真。
+     *
+     * <p>为真时 {@link Host#publish} 不发出这一项，它的结果是 {@code MESSAGING_VALIDATION_002} + {@code messaging.envelope.invalid}
+     * （{@code reason} 为 {@code the data has a lone surrogate and cannot be encoded as UTF-8}），其余各项照常发布
+     * （{@code invocation.md} §5）。以字节设置的 {@code data} 总是假：字节原样，由宿主核对。
+     *
+     * @return 文本编不成 UTF-8 时为真
+     */
+    public boolean hasUnencodableData() {
+        return unencodableData;
+    }
+
+    /**
      * 按 UTF-8 返回 {@code data} 的文本。
      *
-     * @return 文本
+     * @return 文本；不合法的字节序列换成 U+FFFD，{@link #hasUnencodableData()} 为真时孤立的代理项因此读不回原样
      */
     public String dataText() {
         return new String(data, StandardCharsets.UTF_8);
@@ -186,7 +209,7 @@ public final class Envelope {
     }
 
     /**
-     * 按全部属性比较，数据按字节比较。
+     * 按全部属性比较，数据按字节比较，并比较 {@link #hasUnencodableData()}。
      *
      * @param other 另一个对象
      * @return 全部属性相等时为真
@@ -196,7 +219,8 @@ public final class Envelope {
         return other instanceof Envelope that && topic.equals(that.topic) && id.equals(that.id) && source.equals(that.source)
                 && type.equals(that.type) && specVersion.equals(that.specVersion) && Objects.equals(subject, that.subject)
                 && Objects.equals(time, that.time) && dataContentType.equals(that.dataContentType)
-                && Objects.equals(dataSchema, that.dataSchema) && Arrays.equals(data, that.data) && extensions.equals(that.extensions);
+                && Objects.equals(dataSchema, that.dataSchema) && Arrays.equals(data, that.data) && unencodableData == that.unencodableData
+                && extensions.equals(that.extensions);
     }
 
     /**
@@ -207,7 +231,7 @@ public final class Envelope {
     @Override
     public int hashCode() {
         return Objects.hash(topic, id, source, type, specVersion, subject, time, dataContentType, dataSchema, Arrays.hashCode(data),
-                extensions);
+                unencodableData, extensions);
     }
 
     /**
@@ -234,6 +258,7 @@ public final class Envelope {
         private String dataContentType = JSON_CONTENT_TYPE;
         private String dataSchema;
         private byte[] data = new byte[0];
+        private boolean unencodableData;
         private final Map<String, String> extensions = new TreeMap<>();
 
         private Builder(String topic, String id, String source, String type) {
@@ -309,17 +334,25 @@ public final class Envelope {
          */
         public Builder data(byte[] value) {
             this.data = Objects.requireNonNull(value, "value").clone();
+            this.unencodableData = false;
             return this;
         }
 
         /**
-         * 以 UTF-8 文本设置 {@code data}，例如一段 JSON。
+         * 以文本设置 {@code data}，例如一段 JSON：文本严格编码成 UTF-8（RFC-0001「写出与转交」，ADR-0315）。
+         *
+         * <p>文本里有孤立的代理项时编不成 UTF-8，不换成别的字符，也不在这里报错：信封照样建得出，{@link Envelope#hasUnencodableData()} 为真，
+         * {@code data} 是文本的广义 UTF-8（WTF-8）编码；{@link Host#publish} 不发出这一项，在本地以 {@code MESSAGING_VALIDATION_002} +
+         * {@code messaging.envelope.invalid} 失败（{@code invocation.md} §5）。上一版用 {@link String#getBytes}，孤立的代理项换成 {@code ?}，
+         * 宿主收到的是另一份数据。
          *
          * @param value 文本
          * @return 本构建器
          */
         public Builder data(String value) {
-            this.data = Objects.requireNonNull(value, "value").getBytes(StandardCharsets.UTF_8);
+            Optional<byte[]> utf8 = JsonText.encode(Objects.requireNonNull(value, "value"));
+            this.data = utf8.orElseGet(() -> GeneralizedUtf8.encode(value));
+            this.unencodableData = utf8.isEmpty();
             return this;
         }
 
