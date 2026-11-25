@@ -637,4 +637,21 @@ class HostCallbackTest {
         assertEquals("{\"id\":\"xihan.tests.sample\",\"state\":\"Draining\"}", unavailable.getDetails());
     }
 
+    @Test
+    void detailsWithLoneSurrogatesAreNoDetails() {
+        // 以字符串交来的 JSON 文本严格编码成 UTF-8：孤立的代理项编不成，与非法的字节一样当作没有细节，不先换成 ? 再读（RFC-0001「JSON 文本」，ADR-0301）；
+        // protobuf 从线上解出的字符串没有孤立的代理项，这里直接给 readError 一个进程内建的消息
+        String high = String.valueOf((char) 0xD800);
+        String low = String.valueOf((char) 0xDC00);
+        Wire wire = new Wire("xihan.tests.sample");
+        for (String details : List.of("{\"a\":\"" + high + "\"}", "{\"a\":\"" + low + "\"}", "{\"" + high + "\":1}", "{\"a\":\"" + low + high + "\"}")) {
+            assertEquals(Map.of(), Wire.readDetails(details), details);
+            Error read = wire.readError(PluginProto.Error.newBuilder().setCode("SAMPLES_VALIDATION_001").setMessageKey("samples.failed")
+                    .setDetails(details).build());
+            assertTrue(read.details().isEmpty(), details);
+            assertEquals("samples.failed", read.messageKey().orElseThrow(), "the error itself is still read");
+        }
+        String pair = new String(Character.toChars(0x1F600));
+        assertEquals(Map.of("a", pair), Wire.readDetails("{\"a\":\"" + pair + "\"}"), "a surrogate pair is one character");
+    }
 }

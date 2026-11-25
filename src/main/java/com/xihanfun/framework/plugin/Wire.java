@@ -17,7 +17,6 @@ import com.xihanfun.framework.primitives.Unit;
 import com.xihanfun.framework.primitives.json.PrimitivesModule;
 import java.io.IOException;
 import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -125,14 +124,19 @@ final class Wire {
     }
 
     /**
-     * 读细节：先过共同的 JSON 读取检查（RFC-0001，重复成员、超过 64 层、不合法的 Unicode 都不通过），再要求是对象；
-     * 数字按值模型读成 64 位整数或双精度浮点。任何一步不合都当作没有细节。
+     * 读细节：先严格编码成 UTF-8（孤立的代理项编不成，RFC-0001「JSON 文本」，ADR-0301），再过共同的 JSON 读取检查（RFC-0001，重复成员、
+     * 超过 64 层、不合法的 Unicode 都不通过），再要求是对象；数字按值模型读成 64 位整数或双精度浮点。任何一步不合都当作没有细节。
      */
     static Map<String, Object> readDetails(String text) {
         if (text.isEmpty()) {
             return Map.of();
         }
-        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        // String.getBytes 会把孤立的代理项换成 ?，把不合法的细节变成合法的；JsonText.encode 编不出时为空
+        Optional<byte[]> encoded = JsonText.encode(text);
+        if (encoded.isEmpty()) {
+            return Map.of();
+        }
+        byte[] bytes = encoded.get();
         if (JsonText.check(bytes).isPresent()) {
             return Map.of();
         }
