@@ -89,7 +89,7 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 - 插件一侧另由黑盒运行器验证：`EchoConformanceTest` 从 submodule 以 `go run` 运行规范仓库的运行器，跑示例插件 `examples/echo` 的全部用例。
 - 规范没写到的行为不自行发明：停下来报告差异（本 SDK、.NET 与其他 SDK 各自怎么做），提出规范文字，在 framework-spec 提交并推送，再回来改实现。
 - 公开契约的变化顺序：framework-spec 的 RFC 与向量 → XiHan.Framework 的 ADR（`plans/adr`）→ 各 SDK。本仓库的提交说明与文档引用对应的 ADR 编号。
-- 升规范指针：`git -C spec fetch` 后 `git -C spec checkout <提交>`，`git add spec`；跑全部门禁，`VectorCoverageTest` 报出的新向量补回放或列为缺口，`plugin.proto` 变了就重新生成协议代码；实现改动与指针放在同一提交，提交说明写「规范指针升到 <短哈希>」。日常分支可以指向规范已推送的任意提交，发版时必须正好在规范标签上（RFC-0024「实现钉规范」）。
+- 升规范指针：`git -C spec fetch` 后 `git -C spec checkout <提交>`，`git add spec`；跑全部门禁，`VectorCoverageTest` 报出的新向量补回放或列为缺口，`plugin.proto` 变了就重新生成协议代码；实现改动与指针放在同一提交，说明写实现的结果并注 ADR。日常分支可以指向规范已推送的任意提交，发版时必须正好在规范标签上（RFC-0024「实现钉规范」）。
 
 ## 代码规范
 
@@ -138,9 +138,10 @@ framework-sdk-java 是 [XiHan Spec](https://github.com/XiHanFun/framework-spec) 
 ## Git 与提交
 
 - 使用 Conventional Commits：`<type>(<scope>): <中文说明>`。scope 用本仓库的包名 `primitives`、`manifest`、`invocation`、`pipeline`、`operation`、`plugin`，或 `conformance`、`spec`、`docs`、`build`、`ci`。
+- 提交信息只写一行标题，不写正文。说明一句话讲这次改动的结果，不超过 40 个字（汉字、字母、数字、标点各算一个，末尾的 `（ADR-NNNN）` 不计）；不再用「：」「；」往下展开，不罗列文件、成员、取值与改前改后，不写测试数量与门禁结果，这些细节写进 文档页、ADR 或 PR 描述。细则见 `commit-msg` 技能。
 - 保留用户已有和无关改动；不要 reset、checkout 或清理它们，只暂存自己的文件。
 - 提交前检查 `git diff --check` 与相关门禁；容器以 root 写出的 `target/` 不提交。
-- 一项能力或一个独立修复一个提交；契约对齐、实现、测试、README 与规范指针属于同一闭环时放在同一提交，说明里写 ADR 编号与规范指针。
+- 一项能力或一个独立修复一个提交；契约对齐、实现、测试、README 与规范指针属于同一闭环时放在同一提交，说明末尾注 ADR 编号。
 - 不推送、不打标签、不发布，除非用户明确要求。
 
 ## 禁止事项
