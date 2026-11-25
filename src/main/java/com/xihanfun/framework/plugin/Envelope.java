@@ -11,6 +11,8 @@ import java.util.TreeMap;
  * CloudEvents 1.0 信封的平铺（RFC-0009，{@code plugin.proto} {@code Envelope}）：宿主投递给插件的消息，也是插件经宿主发布的消息。
  *
  * <p>不可变：{@link #data()} 返回副本。扩展属性的名字原样保留，例如租户在 {@code xihantenant} 里。
+ *
+ * <p>{@link #dataSchema()} 是 CloudEvents 的 {@code dataschema}（ADR-0305），收到与发布都原样，SDK 不核对、不改写；线上的空串是没有。
  */
 public final class Envelope {
     /** CloudEvents 的规范版本。 */
@@ -30,6 +32,7 @@ public final class Envelope {
     private final String subject;
     private final String time;
     private final String dataContentType;
+    private final String dataSchema;
     private final byte[] data;
     private final Map<String, String> extensions;
 
@@ -42,6 +45,7 @@ public final class Envelope {
         this.subject = builder.subject;
         this.time = builder.time;
         this.dataContentType = builder.dataContentType;
+        this.dataSchema = builder.dataSchema;
         this.data = builder.data.clone();
         this.extensions = Map.copyOf(new TreeMap<>(builder.extensions));
     }
@@ -132,6 +136,15 @@ public final class Envelope {
     }
 
     /**
+     * 返回 {@code dataschema}（ADR-0305），原样。
+     *
+     * @return 数据的模式；没有时为空
+     */
+    public Optional<String> dataSchema() {
+        return Optional.ofNullable(dataSchema);
+    }
+
+    /**
      * 返回 {@code data}。
      *
      * @return 数据的副本
@@ -177,8 +190,8 @@ public final class Envelope {
     public boolean equals(Object other) {
         return other instanceof Envelope that && topic.equals(that.topic) && id.equals(that.id) && source.equals(that.source)
                 && type.equals(that.type) && specVersion.equals(that.specVersion) && Objects.equals(subject, that.subject)
-                && Objects.equals(time, that.time) && dataContentType.equals(that.dataContentType) && Arrays.equals(data, that.data)
-                && extensions.equals(that.extensions);
+                && Objects.equals(time, that.time) && dataContentType.equals(that.dataContentType)
+                && Objects.equals(dataSchema, that.dataSchema) && Arrays.equals(data, that.data) && extensions.equals(that.extensions);
     }
 
     /**
@@ -188,17 +201,18 @@ public final class Envelope {
      */
     @Override
     public int hashCode() {
-        return Objects.hash(topic, id, source, type, specVersion, subject, time, dataContentType, Arrays.hashCode(data), extensions);
+        return Objects.hash(topic, id, source, type, specVersion, subject, time, dataContentType, dataSchema, Arrays.hashCode(data),
+                extensions);
     }
 
     /**
-     * 返回便于日志的文本：主题、ID 与类型，不含数据。
+     * 返回便于日志的文本：主题、ID、类型与有的话的 {@code dataschema}，不含数据。
      *
      * @return 文本
      */
     @Override
     public String toString() {
-        return "Envelope[topic=" + topic + ", id=" + id + ", type=" + type + "]";
+        return "Envelope[topic=" + topic + ", id=" + id + ", type=" + type + (dataSchema == null ? "" : ", dataSchema=" + dataSchema) + "]";
     }
 
     /**
@@ -213,6 +227,7 @@ public final class Envelope {
         private String subject;
         private String time;
         private String dataContentType = JSON_CONTENT_TYPE;
+        private String dataSchema;
         private byte[] data = new byte[0];
         private final Map<String, String> extensions = new TreeMap<>();
 
@@ -264,6 +279,17 @@ public final class Envelope {
          */
         public Builder dataContentType(String value) {
             this.dataContentType = Objects.requireNonNull(value, "value");
+            return this;
+        }
+
+        /**
+         * 设置 {@code dataschema}（ADR-0305）：原样发布，SDK 不核对 URI 语法，也不裁剪（{@code invocation.md} §4）。
+         *
+         * @param value 数据的模式，通常是一个 URI
+         * @return 本构建器
+         */
+        public Builder dataSchema(String value) {
+            this.dataSchema = Objects.requireNonNull(value, "value");
             return this;
         }
 

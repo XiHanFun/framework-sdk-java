@@ -26650,6 +26650,26 @@ java.lang.String defaultValue);
      */
     java.lang.String getExtensionsOrThrow(
         java.lang.String key);
+
+    /**
+     * <pre>
+     * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+     * </pre>
+     *
+     * <code>string data_schema = 11;</code>
+     * @return The dataSchema.
+     */
+    java.lang.String getDataSchema();
+    /**
+     * <pre>
+     * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+     * </pre>
+     *
+     * <code>string data_schema = 11;</code>
+     * @return The bytes for dataSchema.
+     */
+    com.google.protobuf.ByteString
+        getDataSchemaBytes();
   }
   /**
    * <pre>
@@ -26686,6 +26706,7 @@ java.lang.String defaultValue);
       time_ = "";
       dataContentType_ = "";
       data_ = com.google.protobuf.ByteString.EMPTY;
+      dataSchema_ = "";
     }
 
     public static final com.google.protobuf.Descriptors.Descriptor
@@ -27204,6 +27225,53 @@ java.lang.String defaultValue) {
       return map.get(key);
     }
 
+    public static final int DATA_SCHEMA_FIELD_NUMBER = 11;
+    @SuppressWarnings("serial")
+    private volatile java.lang.Object dataSchema_ = "";
+    /**
+     * <pre>
+     * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+     * </pre>
+     *
+     * <code>string data_schema = 11;</code>
+     * @return The dataSchema.
+     */
+    @java.lang.Override
+    public java.lang.String getDataSchema() {
+      java.lang.Object ref = dataSchema_;
+      if (ref instanceof java.lang.String) {
+        return (java.lang.String) ref;
+      } else {
+        com.google.protobuf.ByteString bs = 
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        dataSchema_ = s;
+        return s;
+      }
+    }
+    /**
+     * <pre>
+     * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+     * </pre>
+     *
+     * <code>string data_schema = 11;</code>
+     * @return The bytes for dataSchema.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getDataSchemaBytes() {
+      java.lang.Object ref = dataSchema_;
+      if (ref instanceof java.lang.String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        dataSchema_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+
     private byte memoizedIsInitialized = -1;
     @java.lang.Override
     public final boolean isInitialized() {
@@ -27251,6 +27319,9 @@ java.lang.String defaultValue) {
           internalGetExtensions(),
           ExtensionsDefaultEntryHolder.defaultEntry,
           10);
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(dataSchema_)) {
+        com.google.protobuf.GeneratedMessage.writeString(output, 11, dataSchema_);
+      }
       getUnknownFields().writeTo(output);
     }
     private int computeSerializedSize_0() {
@@ -27292,6 +27363,9 @@ java.lang.String defaultValue) {
             .buildPartial();
         size += com.google.protobuf.CodedOutputStream
             .computeMessageSize(10, extensions__);
+      }
+      if (!com.google.protobuf.GeneratedMessage.isStringEmpty(dataSchema_)) {
+        size += com.google.protobuf.GeneratedMessage.computeStringSize(11, dataSchema_);
       }
       return size;
     }
@@ -27337,6 +27411,8 @@ java.lang.String defaultValue) {
           .equals(other.getData())) return false;
       if (!internalGetExtensions().equals(
           other.internalGetExtensions())) return false;
+      if (!getDataSchema()
+          .equals(other.getDataSchema())) return false;
       if (!getUnknownFields().equals(other.getUnknownFields())) return false;
       return true;
     }
@@ -27370,6 +27446,8 @@ java.lang.String defaultValue) {
         hash = (37 * hash) + EXTENSIONS_FIELD_NUMBER;
         hash = (53 * hash) + internalGetExtensions().hashCode();
       }
+      hash = (37 * hash) + DATA_SCHEMA_FIELD_NUMBER;
+      hash = (53 * hash) + getDataSchema().hashCode();
       hash = (29 * hash) + getUnknownFields().hashCode();
       memoizedHashCode = hash;
       return hash;
@@ -27537,6 +27615,7 @@ java.lang.String defaultValue) {
         dataContentType_ = "";
         data_ = com.google.protobuf.ByteString.EMPTY;
         internalGetMutableExtensions().clear();
+        dataSchema_ = "";
         return this;
       }
 
@@ -27601,6 +27680,9 @@ java.lang.String defaultValue) {
           result.extensions_ = internalGetExtensions();
           result.extensions_.makeImmutable();
         }
+        if (((from_bitField0_ & 0x00000400) != 0)) {
+          result.dataSchema_ = dataSchema_;
+        }
       }
 
       @java.lang.Override
@@ -27661,6 +27743,11 @@ java.lang.String defaultValue) {
         internalGetMutableExtensions().mergeFrom(
             other.internalGetExtensions());
         bitField0_ |= 0x00000200;
+        if (!other.getDataSchema().isEmpty()) {
+          dataSchema_ = other.dataSchema_;
+          bitField0_ |= 0x00000400;
+          onChanged();
+        }
         this.mergeUnknownFields(other.getUnknownFields());
         onChanged();
         return this;
@@ -27739,6 +27826,11 @@ java.lang.String defaultValue) {
                 bitField0_ |= 0x00000200;
                 break;
               } // case 82
+              case 90: {
+                dataSchema_ = input.readStringRequireUtf8();
+                bitField0_ |= 0x00000400;
+                break;
+              } // case 90
               default: {
                 if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                   done = true; // was an endgroup tag
@@ -28688,6 +28780,98 @@ java.lang.String defaultValue) {
         internalGetMutableExtensions().getMutableMap()
             .putAll(values);
         bitField0_ |= 0x00000200;
+        return this;
+      }
+
+      private java.lang.Object dataSchema_ = "";
+      /**
+       * <pre>
+       * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+       * </pre>
+       *
+       * <code>string data_schema = 11;</code>
+       * @return The dataSchema.
+       */
+      public java.lang.String getDataSchema() {
+        java.lang.Object ref = dataSchema_;
+        if (!(ref instanceof java.lang.String)) {
+          com.google.protobuf.ByteString bs =
+              (com.google.protobuf.ByteString) ref;
+          java.lang.String s = bs.toStringUtf8();
+          dataSchema_ = s;
+          return s;
+        } else {
+          return (java.lang.String) ref;
+        }
+      }
+      /**
+       * <pre>
+       * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+       * </pre>
+       *
+       * <code>string data_schema = 11;</code>
+       * @return The bytes for dataSchema.
+       */
+      public com.google.protobuf.ByteString
+          getDataSchemaBytes() {
+        java.lang.Object ref = dataSchema_;
+        if (ref instanceof String) {
+          com.google.protobuf.ByteString b = 
+              com.google.protobuf.ByteString.copyFromUtf8(
+                  (java.lang.String) ref);
+          dataSchema_ = b;
+          return b;
+        } else {
+          return (com.google.protobuf.ByteString) ref;
+        }
+      }
+      /**
+       * <pre>
+       * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+       * </pre>
+       *
+       * <code>string data_schema = 11;</code>
+       * @param value The dataSchema to set.
+       * @return This builder for chaining.
+       */
+      public Builder setDataSchema(
+          java.lang.String value) {
+        java.util.Objects.requireNonNull(value);
+        dataSchema_ = value;
+        bitField0_ |= 0x00000400;
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+       * </pre>
+       *
+       * <code>string data_schema = 11;</code>
+       * @return This builder for chaining.
+       */
+      public Builder clearDataSchema() {
+        dataSchema_ = getDefaultInstance().getDataSchema();
+        bitField0_ = (bitField0_ & ~0x00000400);
+        onChanged();
+        return this;
+      }
+      /**
+       * <pre>
+       * `dataschema`（URI，取值规则见 RFC-0009「信封」）；可空。同一协议版本里的新增字段，较早的对端忽略它（invocation.md §4）。
+       * </pre>
+       *
+       * <code>string data_schema = 11;</code>
+       * @param value The bytes for dataSchema to set.
+       * @return This builder for chaining.
+       */
+      public Builder setDataSchemaBytes(
+          com.google.protobuf.ByteString value) {
+        java.util.Objects.requireNonNull(value);
+        checkByteStringIsUtf8(value);
+        dataSchema_ = value;
+        bitField0_ |= 0x00000400;
+        onChanged();
         return this;
       }
 
@@ -35916,72 +36100,73 @@ java.lang.String defaultValue) {
       "lugin.v1.InvocationMetadata\022\017\n\007attempt\030\003" +
       " \001(\r\022\014\n\004mode\030\004 \001(\t\">\n\023HandleEventRespons" +
       "e\022\'\n\006status\030\001 \001(\0132\027.xihan.plugin.v1.Stat" +
-      "us\"\223\002\n\010Envelope\022\r\n\005topic\030\001 \001(\t\022\n\n\002id\030\002 \001" +
+      "us\"\250\002\n\010Envelope\022\r\n\005topic\030\001 \001(\t\022\n\n\002id\030\002 \001" +
       "(\t\022\016\n\006source\030\003 \001(\t\022\014\n\004type\030\004 \001(\t\022\024\n\014spec" +
       "_version\030\005 \001(\t\022\017\n\007subject\030\006 \001(\t\022\014\n\004time\030" +
       "\007 \001(\t\022\031\n\021data_content_type\030\010 \001(\t\022\014\n\004data" +
       "\030\t \001(\014\022=\n\nextensions\030\n \003(\0132).xihan.plugi" +
-      "n.v1.Envelope.ExtensionsEntry\0321\n\017Extensi" +
-      "onsEntry\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t:\0028\001" +
-      "\"u\n\016PublishRequest\022,\n\tenvelopes\030\001 \003(\0132\031." +
-      "xihan.plugin.v1.Envelope\0225\n\010metadata\030\002 \001" +
-      "(\0132#.xihan.plugin.v1.InvocationMetadata\"" +
-      ";\n\017PublishResponse\022(\n\007results\030\001 \003(\0132\027.xi" +
-      "han.plugin.v1.Status\"\271\001\n\021MiddlewareReque" +
-      "st\022\022\n\nmiddleware\030\001 \001(\t\022\r\n\005stage\030\002 \001(\t\022\r\n" +
-      "\005phase\030\003 \001(\t\0225\n\010metadata\030\004 \001(\0132#.xihan.p" +
-      "lugin.v1.InvocationMetadata\022\021\n\toperation" +
-      "\030\005 \001(\t\022(\n\007outcome\030\006 \001(\0132\027.xihan.plugin.v" +
-      "1.Status\"\344\001\n\022MiddlewareResponse\0221\n\006actio" +
-      "n\030\001 \001(\0162!.xihan.plugin.v1.MiddlewareActi" +
-      "on\022(\n\007outcome\030\002 \001(\0132\027.xihan.plugin.v1.St" +
-      "atus\022A\n\007baggage\030\003 \003(\01320.xihan.plugin.v1." +
-      "MiddlewareResponse.BaggageEntry\032.\n\014Bagga" +
-      "geEntry\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t:\0028\001\"" +
-      ";\n\006Status\022\n\n\002ok\030\001 \001(\010\022%\n\005error\030\002 \001(\0132\026.x" +
-      "ihan.plugin.v1.Error\"p\n\005Error\022\014\n\004code\030\001 " +
-      "\001(\t\022\023\n\013message_key\030\002 \001(\t\022\014\n\004text\030\003 \001(\t\022\017" +
-      "\n\007details\030\004 \001(\t\022%\n\005inner\030\005 \001(\0132\026.xihan.p" +
-      "lugin.v1.Error*\201\001\n\014HealthStatus\022\035\n\031HEALT" +
-      "H_STATUS_UNSPECIFIED\020\000\022\031\n\025HEALTH_STATUS_" +
-      "HEALTHY\020\001\022\032\n\026HEALTH_STATUS_DEGRADED\020\002\022\033\n" +
-      "\027HEALTH_STATUS_UNHEALTHY\020\003*\231\002\n\016Lifecycle" +
-      "State\022\034\n\030LIFECYCLE_STATE_DECLARED\020\000\022\034\n\030L" +
-      "IFECYCLE_STATE_RESOLVED\020\001\022\036\n\032LIFECYCLE_S" +
-      "TATE_CONFIGURED\020\002\022\033\n\027LIFECYCLE_STATE_STA" +
-      "RTED\020\003\022\031\n\025LIFECYCLE_STATE_READY\020\004\022\034\n\030LIF" +
-      "ECYCLE_STATE_DEGRADED\020\005\022\034\n\030LIFECYCLE_STA" +
-      "TE_DRAINING\020\006\022\033\n\027LIFECYCLE_STATE_STOPPED" +
-      "\020\007\022\032\n\026LIFECYCLE_STATE_FAILED\020\010*z\n\020Middle" +
-      "wareAction\022!\n\035MIDDLEWARE_ACTION_UNSPECIF" +
-      "IED\020\000\022\036\n\032MIDDLEWARE_ACTION_CONTINUE\020\001\022#\n" +
-      "\037MIDDLEWARE_ACTION_SHORT_CIRCUIT\020\0022\317\005\n\006P" +
-      "lugin\022R\n\tHandshake\022!.xihan.plugin.v1.Han" +
-      "dshakeRequest\032\".xihan.plugin.v1.Handshak" +
-      "eResponse\022R\n\tConfigure\022!.xihan.plugin.v1" +
-      ".ConfigureRequest\032\".xihan.plugin.v1.Conf" +
-      "igureResponse\022F\n\005Start\022\035.xihan.plugin.v1" +
-      ".StartRequest\032\036.xihan.plugin.v1.StartRes" +
-      "ponse\022C\n\004Stop\022\034.xihan.plugin.v1.StopRequ" +
-      "est\032\035.xihan.plugin.v1.StopResponse\022I\n\006He" +
-      "alth\022\036.xihan.plugin.v1.HealthRequest\032\037.x" +
-      "ihan.plugin.v1.HealthResponse\022P\n\013WatchHe" +
-      "alth\022\036.xihan.plugin.v1.HealthRequest\032\037.x" +
-      "ihan.plugin.v1.HealthResponse0\001\022I\n\006Invok" +
-      "e\022\036.xihan.plugin.v1.InvokeRequest\032\037.xiha" +
-      "n.plugin.v1.InvokeResponse\022N\n\014InvokeStre" +
-      "am\022\034.xihan.plugin.v1.StreamFrame\032\034.xihan" +
-      ".plugin.v1.StreamFrame(\0010\001\022X\n\013HandleEven" +
-      "t\022#.xihan.plugin.v1.HandleEventRequest\032$" +
-      ".xihan.plugin.v1.HandleEventResponse2\237\001\n" +
-      "\004Host\022I\n\006Invoke\022\036.xihan.plugin.v1.Invoke" +
-      "Request\032\037.xihan.plugin.v1.InvokeResponse" +
-      "\022L\n\007Publish\022\037.xihan.plugin.v1.PublishReq" +
-      "uest\032 .xihan.plugin.v1.PublishResponseB\216" +
-      "\001\n com.xihanfun.framework.plugin.v1B\013Plu" +
-      "ginProtoZ7github.com/xihanfun/framework-" +
-      "sdk-go/plugin/v1;pluginv1\252\002#XiHan.Framew" +
-      "ork.Plugins.Protocol.V1b\006proto3"
+      "n.v1.Envelope.ExtensionsEntry\022\023\n\013data_sc" +
+      "hema\030\013 \001(\t\0321\n\017ExtensionsEntry\022\013\n\003key\030\001 \001" +
+      "(\t\022\r\n\005value\030\002 \001(\t:\0028\001\"u\n\016PublishRequest\022" +
+      ",\n\tenvelopes\030\001 \003(\0132\031.xihan.plugin.v1.Env" +
+      "elope\0225\n\010metadata\030\002 \001(\0132#.xihan.plugin.v" +
+      "1.InvocationMetadata\";\n\017PublishResponse\022" +
+      "(\n\007results\030\001 \003(\0132\027.xihan.plugin.v1.Statu" +
+      "s\"\271\001\n\021MiddlewareRequest\022\022\n\nmiddleware\030\001 " +
+      "\001(\t\022\r\n\005stage\030\002 \001(\t\022\r\n\005phase\030\003 \001(\t\0225\n\010met" +
+      "adata\030\004 \001(\0132#.xihan.plugin.v1.Invocation" +
+      "Metadata\022\021\n\toperation\030\005 \001(\t\022(\n\007outcome\030\006" +
+      " \001(\0132\027.xihan.plugin.v1.Status\"\344\001\n\022Middle" +
+      "wareResponse\0221\n\006action\030\001 \001(\0162!.xihan.plu" +
+      "gin.v1.MiddlewareAction\022(\n\007outcome\030\002 \001(\013" +
+      "2\027.xihan.plugin.v1.Status\022A\n\007baggage\030\003 \003" +
+      "(\01320.xihan.plugin.v1.MiddlewareResponse." +
+      "BaggageEntry\032.\n\014BaggageEntry\022\013\n\003key\030\001 \001(" +
+      "\t\022\r\n\005value\030\002 \001(\t:\0028\001\";\n\006Status\022\n\n\002ok\030\001 \001" +
+      "(\010\022%\n\005error\030\002 \001(\0132\026.xihan.plugin.v1.Erro" +
+      "r\"p\n\005Error\022\014\n\004code\030\001 \001(\t\022\023\n\013message_key\030" +
+      "\002 \001(\t\022\014\n\004text\030\003 \001(\t\022\017\n\007details\030\004 \001(\t\022%\n\005" +
+      "inner\030\005 \001(\0132\026.xihan.plugin.v1.Error*\201\001\n\014" +
+      "HealthStatus\022\035\n\031HEALTH_STATUS_UNSPECIFIE" +
+      "D\020\000\022\031\n\025HEALTH_STATUS_HEALTHY\020\001\022\032\n\026HEALTH" +
+      "_STATUS_DEGRADED\020\002\022\033\n\027HEALTH_STATUS_UNHE" +
+      "ALTHY\020\003*\231\002\n\016LifecycleState\022\034\n\030LIFECYCLE_" +
+      "STATE_DECLARED\020\000\022\034\n\030LIFECYCLE_STATE_RESO" +
+      "LVED\020\001\022\036\n\032LIFECYCLE_STATE_CONFIGURED\020\002\022\033" +
+      "\n\027LIFECYCLE_STATE_STARTED\020\003\022\031\n\025LIFECYCLE" +
+      "_STATE_READY\020\004\022\034\n\030LIFECYCLE_STATE_DEGRAD" +
+      "ED\020\005\022\034\n\030LIFECYCLE_STATE_DRAINING\020\006\022\033\n\027LI" +
+      "FECYCLE_STATE_STOPPED\020\007\022\032\n\026LIFECYCLE_STA" +
+      "TE_FAILED\020\010*z\n\020MiddlewareAction\022!\n\035MIDDL" +
+      "EWARE_ACTION_UNSPECIFIED\020\000\022\036\n\032MIDDLEWARE" +
+      "_ACTION_CONTINUE\020\001\022#\n\037MIDDLEWARE_ACTION_" +
+      "SHORT_CIRCUIT\020\0022\317\005\n\006Plugin\022R\n\tHandshake\022" +
+      "!.xihan.plugin.v1.HandshakeRequest\032\".xih" +
+      "an.plugin.v1.HandshakeResponse\022R\n\tConfig" +
+      "ure\022!.xihan.plugin.v1.ConfigureRequest\032\"" +
+      ".xihan.plugin.v1.ConfigureResponse\022F\n\005St" +
+      "art\022\035.xihan.plugin.v1.StartRequest\032\036.xih" +
+      "an.plugin.v1.StartResponse\022C\n\004Stop\022\034.xih" +
+      "an.plugin.v1.StopRequest\032\035.xihan.plugin." +
+      "v1.StopResponse\022I\n\006Health\022\036.xihan.plugin" +
+      ".v1.HealthRequest\032\037.xihan.plugin.v1.Heal" +
+      "thResponse\022P\n\013WatchHealth\022\036.xihan.plugin" +
+      ".v1.HealthRequest\032\037.xihan.plugin.v1.Heal" +
+      "thResponse0\001\022I\n\006Invoke\022\036.xihan.plugin.v1" +
+      ".InvokeRequest\032\037.xihan.plugin.v1.InvokeR" +
+      "esponse\022N\n\014InvokeStream\022\034.xihan.plugin.v" +
+      "1.StreamFrame\032\034.xihan.plugin.v1.StreamFr" +
+      "ame(\0010\001\022X\n\013HandleEvent\022#.xihan.plugin.v1" +
+      ".HandleEventRequest\032$.xihan.plugin.v1.Ha" +
+      "ndleEventResponse2\237\001\n\004Host\022I\n\006Invoke\022\036.x" +
+      "ihan.plugin.v1.InvokeRequest\032\037.xihan.plu" +
+      "gin.v1.InvokeResponse\022L\n\007Publish\022\037.xihan" +
+      ".plugin.v1.PublishRequest\032 .xihan.plugin" +
+      ".v1.PublishResponseB\216\001\n com.xihanfun.fra" +
+      "mework.plugin.v1B\013PluginProtoZ7github.co" +
+      "m/xihanfun/framework-sdk-go/plugin/v1;pl" +
+      "uginv1\252\002#XiHan.Framework.Plugins.Protoco" +
+      "l.V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -36160,7 +36345,7 @@ java.lang.String defaultValue) {
     internal_static_xihan_plugin_v1_Envelope_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_xihan_plugin_v1_Envelope_descriptor,
-        new java.lang.String[] { "Topic", "Id", "Source", "Type", "SpecVersion", "Subject", "Time", "DataContentType", "Data", "Extensions", });
+        new java.lang.String[] { "Topic", "Id", "Source", "Type", "SpecVersion", "Subject", "Time", "DataContentType", "Data", "Extensions", "DataSchema", });
     internal_static_xihan_plugin_v1_Envelope_ExtensionsEntry_descriptor =
       internal_static_xihan_plugin_v1_Envelope_descriptor.getNestedType(0);
     internal_static_xihan_plugin_v1_Envelope_ExtensionsEntry_fieldAccessorTable = new

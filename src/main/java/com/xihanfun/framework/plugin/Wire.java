@@ -389,6 +389,9 @@ final class Wire {
         if (!envelope.getDataContentType().isEmpty()) {
             builder.dataContentType(envelope.getDataContentType());
         }
+        if (!envelope.getDataSchema().isEmpty()) {
+            builder.dataSchema(envelope.getDataSchema());
+        }
         return builder.build();
     }
 
@@ -404,6 +407,7 @@ final class Wire {
                 .putAllExtensions(envelope.extensions());
         envelope.subject().ifPresent(builder::setSubject);
         envelope.time().ifPresent(builder::setTime);
+        envelope.dataSchema().ifPresent(builder::setDataSchema);
         return builder.build();
     }
 
