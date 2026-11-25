@@ -47,6 +47,15 @@ final class Wire {
     /** 写出截止时间的固定偏移（.NET 的 {@code O} 格式在 UTC 时的写法）。 */
     private static final String UTC_OFFSET = "+00:00";
 
+    /** 公历 400 年的秒数：挪动整数个周期，月、日与一天里的时刻都不变。 */
+    private static final long GREGORIAN_CYCLE_SECONDS = 146_097L * 86_400;
+
+    /** {@link LocalDateTime} 能表示的最早时刻；{@link Instant} 比它早约一年。 */
+    private static final Instant EARLIEST_DATE_TIME = LocalDateTime.MIN.toInstant(ZoneOffset.UTC);
+
+    /** {@link LocalDateTime} 能表示的最晚时刻；{@link Instant} 比它晚约一年。 */
+    private static final Instant LATEST_DATE_TIME = LocalDateTime.MAX.toInstant(ZoneOffset.UTC);
+
     private final String pluginId;
 
     Wire(String pluginId) {
@@ -381,13 +390,26 @@ final class Wire {
 
     /**
      * 按 RFC 3339 写出信封的 {@code time}（RFC-0009「信封」第 3 条）：换算成 UTC、以 {@code Z} 结尾，秒的小数去掉末尾的 0，全为 0 时不写小数点，
-     * 最多九位，如 {@code 2026-11-25T03:25:00.5Z}；六个 SDK 对同一时刻写出同一份文本（精度以内）。年份按四位补零，范围由 {@link Envelope.Builder#time}
-     * 核对过。
+     * 最多九位，如 {@code 2026-11-25T03:25:00.5Z}；六个 SDK 对同一时刻写出同一份文本（精度以内）。年份至少四位、不足补零；不在本地核对
+     * （ADR-0306）：{@code 9999} 年之后照写五位以上的年份，{@link Instant} 的年份 {@code 0} 与负数照写 {@code 0000} 与带负号的年份（与 Go 的写法相同），
+     * 由宿主拒绝那一项。
      */
     static String formatTime(Instant time) {
-        OffsetDateTime utc = time.atOffset(ZoneOffset.UTC);
-        String text = String.format(Locale.ROOT, "%04d-%02d-%02dT%02d:%02d:%02d", utc.getYear(), utc.getMonthValue(), utc.getDayOfMonth(),
-                utc.getHour(), utc.getMinute(), utc.getSecond());
+        long seconds = time.getEpochSecond();
+        long shifted = 0;
+        // LocalDateTime 的年份只到 ±999999999，Instant 的两端各多出约一年：先挪一个 400 年的周期，写年份时再加回来，任何 Instant 都写得出
+        if (time.isAfter(LATEST_DATE_TIME)) {
+            seconds -= GREGORIAN_CYCLE_SECONDS;
+            shifted = 400;
+        } else if (time.isBefore(EARLIEST_DATE_TIME)) {
+            seconds += GREGORIAN_CYCLE_SECONDS;
+            shifted = -400;
+        }
+        LocalDateTime utc = LocalDateTime.ofEpochSecond(seconds, time.getNano(), ZoneOffset.UTC);
+        long year = utc.getYear() + shifted;
+        // %04d 会把负号算进宽度（-1 写成 -001）：负号另写，绝对值补到四位
+        String text = String.format(Locale.ROOT, "%s%04d-%02d-%02dT%02d:%02d:%02d", year < 0 ? "-" : "", Math.abs(year),
+                utc.getMonthValue(), utc.getDayOfMonth(), utc.getHour(), utc.getMinute(), utc.getSecond());
         if (utc.getNano() == 0) {
             return text + "Z";
         }

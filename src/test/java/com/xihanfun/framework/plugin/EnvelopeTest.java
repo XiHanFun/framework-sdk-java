@@ -85,8 +85,8 @@ class EnvelopeTest {
     void timesFromTheHostAreReadInUtcToTheNanosecond() {
         READ.forEach((text, time) -> assertEquals(time, deliveredTime(text), text));
         // 闰秒、没有偏移、空格代替 T、十位小数、只有空白
-        for (String invalid : List.of("2026-11-25T03:25:60Z", "2026-11-25T03:25:00", "2026-11-25 03:25:00Z", "2026-11-25T03:25:00.1234567890Z",
-                " ")) {
+        for (String invalid : List.of("2026-11-25T03:25:60Z", "2026-11-25T03:25:00", "2026-11-25 03:25:00Z",
+                "2026-11-25T03:25:00.1234567890Z", " ")) {
             assertEquals(Optional.empty(), delivered(invalid, ""), invalid);
         }
     }
@@ -112,10 +112,18 @@ class EnvelopeTest {
     }
 
     @Test
-    void timesOutsideTheFourDigitYearsAreRejected() {
-        for (Instant outside : List.of(Instant.parse("0000-12-31T23:59:59.999999999Z"), Instant.parse("+10000-01-01T00:00:00Z"),
-                Instant.MIN, Instant.MAX)) {
-            assertThrows(IllegalArgumentException.class, () -> envelope().time(outside), outside.toString());
+    void timesOutsideTheFourDigitYearsAreWrittenAsIsForTheHostToReject() {
+        // 不在本地核对（ADR-0306）：换算成 UTC 之后落到 0001–9999 年之外的照写，宿主以 messaging.envelope.invalid_time 拒绝那一项
+        List<Written> outside = List.of(
+                written("0001-01-01T00:30:00+01:00", "0000-12-31T23:30:00Z"),
+                written("9999-12-31T23:30:00-01:00", "10000-01-01T00:30:00Z"),
+                new Written(Instant.parse("0000-12-31T23:59:59.999999999Z"), "0000-12-31T23:59:59.999999999Z"),
+                new Written(Instant.parse("-0001-06-01T00:00:00Z"), "-0001-06-01T00:00:00Z"),
+                new Written(Instant.MIN, "-1000000000-01-01T00:00:00Z"),
+                new Written(Instant.MAX, "1000000000-12-31T23:59:59.999999999Z"));
+        for (Written written : outside) {
+            assertEquals(written.text(), Wire.envelope(envelope().time(written.time()).build()).getTime(), written.toString());
+            assertEquals(Optional.empty(), Wire.parseTimestamp(written.text()), "the host cannot read " + written.text());
         }
         assertThrows(NullPointerException.class, () -> envelope().time(null));
     }
