@@ -1,5 +1,6 @@
 package com.xihanfun.framework.operation;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -22,6 +23,7 @@ import com.xihanfun.framework.primitives.Stability;
 import com.xihanfun.framework.primitives.Unit;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -184,6 +186,45 @@ class OperationInvokerTest {
                 "a missing Maybe member is none");
         assertEquals(OperationErrors.INVALID_PAYLOAD, notes.invoke(Context.background(), OperationRequest.of("notes.create", "{\"title\":1}"))
                 .outcome().error().orElseThrow().code(), "numbers are not coerced into strings");
+    }
+
+    @Test
+    void textPayloadsAreEncodedAsStrictUtf8() {
+        // 以字符串给出的 JSON 文本严格编码成 UTF-8（RFC-0001「JSON 文本」，ADR-0312）：上一版 getBytes 把孤立的代理项换成 ?，读出另一份合法的 JSON
+        String high = String.valueOf((char) 0xD800);
+        String low = String.valueOf((char) 0xDC00);
+        OperationRegistry registry = new OperationRegistry();
+        registry.add(OperationContract.of("notes.create"), Note.class, Note.class, (context, request) -> Result.ok(request));
+        OperationInvoker notes = new OperationInvoker(registry);
+        // 载荷是广义 UTF-8：孤立的代理项各写成三个字节，不是合法的 UTF-8，读它的一方都按不是 JSON 处理
+        Map<String, String> lone = Map.of(high, "eda080", low, "edb080", low + high, "edb080eda080",
+                "a" + high + pair(), "61eda080f09f9880");
+        lone.forEach((text, encoded) -> {
+            OperationRequest request = OperationRequest.of("notes.create", "{\"title\":\"" + text + "\"}");
+            assertTrue(request.hasUnencodableText(), encoded);
+            assertEquals("7b227469746c65223a22" + encoded + "227d", HexFormat.of().formatHex(request.payload()));
+            Error error = notes.invoke(Context.background(), request).outcome().error().orElseThrow();
+            assertEquals(OperationErrors.INVALID_PAYLOAD, error.code(), encoded);
+            assertEquals(Optional.of("kernel.operation.invalid_payload"), error.messageKey());
+            assertEquals(Map.of("id", "notes.create", "reason", "$"), error.details(), "a lone surrogate is not JSON");
+        });
+        // 成对的代理项是一个字符，照常编码与调用
+        String paired = "{\"title\":\"" + pair() + "\"}";
+        OperationRequest request = OperationRequest.of("notes.create", paired);
+        assertFalse(request.hasUnencodableText());
+        assertArrayEquals(paired.getBytes(StandardCharsets.UTF_8), request.payload());
+        // 响应的写出照 System.Text.Json 把非 ASCII 字符写成转义
+        assertEquals(Optional.of("{\"title\":\"\\uD83D\\uDE00\",\"text\":null}"),
+                notes.invoke(Context.background(), request).payloadText());
+        // 以字节给出的原样，由读它的一方核对
+        assertFalse(OperationRequest.of("notes.create", HexFormat.of().parseHex("eda080")).hasUnencodableText(),
+                "bytes are carried as they are");
+        assertFalse(OperationRequest.of("notes.create").hasUnencodableText());
+    }
+
+    /** U+1F600：平面以外的字符，在 Java 字符串里是一对代理项。 */
+    private static String pair() {
+        return new String(Character.toChars(0x1F600));
     }
 
     @Test

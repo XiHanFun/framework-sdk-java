@@ -11,6 +11,7 @@ import com.xihanfun.framework.operation.OperationResponse;
 import com.xihanfun.framework.plugin.v1.HostGrpc;
 import com.xihanfun.framework.plugin.v1.PluginProto;
 import com.xihanfun.framework.primitives.Error;
+import com.xihanfun.framework.primitives.JsonText;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
 import io.grpc.ManagedChannel;
@@ -38,8 +39,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>回调端点在启动时按 {@code XIHAN_PLUGIN_HOST_ADDRESS} 的顺序取第一个本 SDK 能连的（回环 TCP，Linux 上另有 Unix 域套接字），之后不换；
  * 没有能连的端点时每次回调都以 {@code PLUGINS_UNAVAILABLE_001} + {@value PluginMessages#HOST_UNAVAILABLE} 失败、不发请求（{@code handshake.md} §4）。
  * 发出之前在本地按宿主的顺序核对，与宿主给出同样的错误：所需权限既在清单 {@code permissions} 里、也在 {@code Configure} 授予的权限里；
- * 上下文的租户是宿主此刻交给插件、还在处理的某个调用或投递的租户（ADR-0195）；最后，上下文的截止时间已过或已被取消时也不发请求。
- * 每次回调都带会话令牌，元数据取自所在的调用上下文
+ * 上下文的租户是宿主此刻交给插件、还在处理的某个调用或投递的租户（ADR-0195）；然后，上下文的截止时间已过或已被取消时也不发请求；
+ * {@code Host.Invoke} 最后还核对以 JSON 文本给出的载荷编得成 UTF-8（ADR-0312）。每次回调都带会话令牌，元数据取自所在的调用上下文
  * （追踪、截止时间、已登记的 Baggage），gRPC 调用的截止时间与之相同，取消上下文即取消回调。线程安全；连接在第一次回调时建立。
  */
 public final class Host {
@@ -144,6 +145,11 @@ public final class Host {
     /**
      * 经宿主的完整管道调用一个操作。
      *
+     * <p>以 JSON 文本创建的请求（{@link OperationRequest#of(String, String)}）文本编不成 UTF-8 时（孤立的代理项，
+     * {@link OperationRequest#hasUnencodableText()}）不发请求，结果为 {@code KERNEL_VALIDATION_001} + {@code kernel.operation.invalid_payload}
+     * （{@code id} 为操作 ID，{@code reason} 为 {@code $}），与宿主读到不是 JSON 的载荷相同；这一项排在端点、权限、租户、截止时间与取消的核对之后
+     * （{@code invocation.md} §5，ADR-0312）。以字节给出的载荷原样发出，由宿主核对。
+     *
      * @param context 调用上下文
      * @param request XGI 请求
      * @return 宿主的结果
@@ -154,6 +160,10 @@ public final class Host {
         Optional<Error> refused = refuse(context, RPC_INVOKE, request.id(), PERMISSION_INVOKE);
         if (refused.isPresent()) {
             return OperationResponse.failed(refused.get());
+        }
+        // 宿主在管道的 Validate 阶段才解码载荷：权限、租户与截止时间的错误先于它，所以排在 refuse 之后
+        if (request.hasUnencodableText()) {
+            return OperationResponse.failed(OperationErrors.invalidPayload(request.id(), JsonText.ROOT));
         }
         PluginProto.InvokeRequest message = PluginProto.InvokeRequest.newBuilder()
                 .setOperation(request.id())

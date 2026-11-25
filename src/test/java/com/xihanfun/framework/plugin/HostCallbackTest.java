@@ -13,6 +13,7 @@ import com.xihanfun.framework.invocation.DeadlineSignals;
 import com.xihanfun.framework.operation.OperationContract;
 import com.xihanfun.framework.operation.OperationErrors;
 import com.xihanfun.framework.operation.OperationRegistry;
+import com.xihanfun.framework.operation.OperationRequest;
 import com.xihanfun.framework.operation.OperationResponse;
 import com.xihanfun.framework.plugin.v1.HostGrpc;
 import com.xihanfun.framework.plugin.v1.PluginProto;
@@ -74,6 +75,9 @@ class HostCallbackTest {
     /** 宿主收到的发布请求。 */
     private final List<PluginProto.PublishRequest> published = new CopyOnWriteArrayList<>();
 
+    /** 宿主收到的 {@code Host.Invoke} 载荷。 */
+    private final List<ByteString> payloads = new CopyOnWriteArrayList<>();
+
     /** 请求：经宿主调用 {@code operation}，{@code tenant} 不为空时先往上下文里加这个租户。 */
     record Relay(String operation, String tenant) {
     }
@@ -84,6 +88,14 @@ class HostCallbackTest {
      * 墙上时钟离截止时间还有 5 分钟。
      */
     record Guarded(String operation, String state) {
+    }
+
+    /**
+     * 请求：以 JSON 文本 {@code {"title":"…"}} 经宿主调用 {@code operation}；{@code text} 是 {@code high}、{@code low}、{@code reversed}
+     * （孤立的代理项）或 {@code pair}（成对的代理项）；{@code state} 为 {@code expired} 或 {@code cancelled} 时上下文先到截止时间或先被取消，
+     * {@code tenant} 不为空时先往上下文里加这个租户。
+     */
+    record Text(String operation, String text, String state, String tenant) {
     }
 
     /** 请求：发布这些主题，各带可选的 {@code xihantenant}；{@code tenant} 不为空时先往上下文里加这个租户。 */
@@ -114,6 +126,7 @@ class HostCallbackTest {
             @Override
             public void invoke(PluginProto.InvokeRequest request, StreamObserver<PluginProto.InvokeResponse> observer) {
                 metadata.add(request.getMetadata());
+                payloads.add(request.getPayload());
                 Deadline deadline = io.grpc.Context.current().getDeadline();
                 deadlines.add(deadline == null ? Instant.EPOCH : Instant.now().plusNanos(deadline.timeRemaining(TimeUnit.NANOSECONDS)));
                 String operation = request.getOperation();
@@ -235,6 +248,25 @@ class HostCallbackTest {
                 OperationResponse response = Host.of(scope.context()).orElseThrow().invoke(scope.context(), request.operation(),
                         "{}".getBytes(StandardCharsets.UTF_8));
                 return Result.ok(response.outcome().error().map(Outcome::failed).orElseGet(() -> Outcome.of(response.outcome(), "")));
+            }
+        });
+        registry.add(OperationContract.of("samples.text"), Text.class, Outcome.class, (context, request) -> {
+            Context call = request.tenant() == null ? context : context.withBaggage(BaggageKeys.TENANT, request.tenant());
+            String text = switch (request.text()) {
+                case "high" -> String.valueOf((char) 0xD800);
+                case "low" -> String.valueOf((char) 0xDC00);
+                case "reversed" -> String.valueOf((char) 0xDC00) + (char) 0xD800;
+                default -> new String(Character.toChars(0x1F600));
+            };
+            OperationRequest xgi = OperationRequest.of(request.operation(), "{\"title\":\"" + text + "\"}");
+            CancellableContext scope = "expired".equals(request.state()) ? call.withTimeout(Duration.ZERO) : call.withCancellation();
+            try (scope) {
+                if ("cancelled".equals(request.state())) {
+                    scope.cancel();
+                }
+                OperationResponse response = Host.of(scope.context()).orElseThrow().invoke(scope.context(), xgi);
+                return Result.ok(response.outcome().error().map(Outcome::failed)
+                        .orElseGet(() -> Outcome.of(response.outcome(), response.payloadText().orElse(""))));
             }
         });
         registry.add(OperationContract.of("samples.publish"), Publish.class, Published.class, (context, request) -> {
@@ -445,6 +477,44 @@ class HostCallbackTest {
                 Map.of(PluginRuntime.ENV_HOST_ADDRESS, hostAddress()))) {
             assertEquals(PluginMessages.CALLBACK_DENIED, call(plugin, "samples.wait", new Guarded("orders.create", "cancelled"), null, Outcome.class).key());
         }
+    }
+
+    @Test
+    void aTextPayloadThatCannotBeEncodedFailsLocallyAfterTheOtherChecks() throws Exception {
+        // invocation.md §5（ADR-0312）：以字符串给出的载荷发出前严格编码成 UTF-8，孤立的代理项编不成即不发请求，与宿主读到不是 JSON 时相同
+        Outcome invalid = new Outcome(false, "KERNEL_VALIDATION_001", "kernel.operation.invalid_payload",
+                "{\"id\":\"orders.create\",\"reason\":\"$\"}", "");
+        try (RunningPlugin plugin = start(hostAddress())) {
+            for (String text : List.of("high", "low", "reversed")) {
+                assertEquals(invalid, call(plugin, "samples.text", new Text("orders.create", text, null, null), null, Outcome.class), text);
+            }
+            assertEquals(List.of(), sessions, "a payload that cannot be encoded is not sent");
+            // 成对的代理项是一个字符：照常发出，宿主收到它的 UTF-8
+            Outcome paired = call(plugin, "samples.text", new Text("orders.create", "pair", null, null), null, Outcome.class);
+            assertEquals(new Outcome(true, "", "", "", "{\"echo\":\"orders.create\"}"), paired);
+            assertEquals(List.of(ByteString.copyFromUtf8("{\"title\":\"" + new String(Character.toChars(0x1F600)) + "\"}")), payloads);
+            // 先后：租户、截止时间与取消先失败的仍报它们（宿主在管道的 Validate 阶段才解码载荷）
+            assertEquals(PluginMessages.CALLBACK_TENANT_DENIED,
+                    call(plugin, "samples.text", new Text("orders.create", "high", null, "t2"), "t1", Outcome.class).key());
+            assertEquals(new Outcome(false, "KERNEL_TIMEOUT_001", "kernel.invocation.deadline_exceeded", "", ""),
+                    call(plugin, "samples.text", new Text("orders.create", "high", "expired", null), null, Outcome.class));
+            assertEquals(new Outcome(false, "KERNEL_CANCELLED_001", "kernel.invocation.cancelled", "", ""),
+                    call(plugin, "samples.text", new Text("orders.create", "low", "cancelled", null), null, Outcome.class));
+            assertEquals(1, sessions.size(), "only the paired payload reaches the host");
+        }
+        // 端点与权限同样在前
+        Path missing = Files.createDirectories(directory.resolve("missing"));
+        try (RunningPlugin plugin = start(missing, RunningPlugin.MANIFEST, Map.of())) {
+            assertEquals(PluginMessages.HOST_UNAVAILABLE,
+                    call(plugin, "samples.text", new Text("orders.create", "high", null, null), null, Outcome.class).key());
+        }
+        Path undeclared = Files.createDirectories(directory.resolve("undeclared"));
+        try (RunningPlugin plugin = start(undeclared, RunningPlugin.MANIFEST.replace("\"capability:kernel.pipeline\", ", ""),
+                Map.of(PluginRuntime.ENV_HOST_ADDRESS, hostAddress()))) {
+            assertEquals(PluginMessages.CALLBACK_DENIED,
+                    call(plugin, "samples.text", new Text("orders.create", "high", null, null), null, Outcome.class).key());
+        }
+        assertEquals(1, sessions.size());
     }
 
     @Test
