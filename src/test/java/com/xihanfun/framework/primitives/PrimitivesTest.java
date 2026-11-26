@@ -63,6 +63,13 @@ class PrimitivesTest {
         for (String value : Vectors.strings(vectors.get("values").get("unacceptable"))) {
             assertFalse(BaggageKeys.isAcceptableValue(value), value + " must be unacceptable");
         }
+        // ADR-0321：孤立的代理项不合（RFC-0001「孤立的代理项」），成对的是平面以外的一个字符；样例以 UTF-16 码元列出
+        for (JsonNode sample : vectors.get("values").get("acceptableUtf16")) {
+            assertTrue(BaggageKeys.isAcceptableValue(Vectors.utf16(sample.get("utf16"))), sample.get("name").asText());
+        }
+        for (JsonNode sample : vectors.get("values").get("unacceptableUtf16")) {
+            assertFalse(BaggageKeys.isAcceptableValue(Vectors.utf16(sample.get("utf16"))), sample.get("name").asText());
+        }
         assertTrue(BaggageKeys.isAcceptableValue("t1"));
         assertTrue(BaggageKeys.isAcceptableValue("x".repeat(BaggageKeys.MAX_VALUE_LENGTH)));
         assertFalse(BaggageKeys.isAcceptableValue("x".repeat(BaggageKeys.MAX_VALUE_LENGTH + 1)));

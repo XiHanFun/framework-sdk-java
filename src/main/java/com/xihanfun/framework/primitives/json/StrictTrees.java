@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.xihanfun.framework.internal.UnicodeText;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.xihanfun.framework.primitives.JsonText;
 import java.io.IOException;
@@ -111,13 +112,8 @@ final class StrictTrees {
      * 字符串与成员名必须是合法的 Unicode：Jackson 把 {@code \ud800} 原样还原成孤立的代理项，这里拒绝。
      */
     private static String text(String value, DeserializationContext context, Class<?> target) throws IOException {
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (Character.isHighSurrogate(current) && index + 1 < value.length() && Character.isLowSurrogate(value.charAt(index + 1))) {
-                index++;
-            } else if (Character.isSurrogate(current)) {
-                return context.reportInputMismatch(target, "%s", "A JSON string contains a lone surrogate.");
-            }
+        if (UnicodeText.hasLoneSurrogate(value)) {
+            return context.reportInputMismatch(target, "%s", "A JSON string contains a lone surrogate.");
         }
         return value;
     }

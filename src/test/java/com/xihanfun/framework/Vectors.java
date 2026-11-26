@@ -45,6 +45,18 @@ public final class Vectors {
     }
 
     /**
+     * 按 UTF-16 码元组字符串（RFC-0012「一致性」的写法）：JSON 字符串写不出孤立的代理项，这类样例以四位十六进制的码元列出。
+     *
+     * @param units 码元数组节点，如 {@code ["0061", "D800"]}
+     * @return 由这些码元组成的字符串
+     */
+    public static String utf16(JsonNode units) {
+        StringBuilder text = new StringBuilder();
+        units.forEach(unit -> text.append((char) Integer.parseInt(unit.textValue(), 16)));
+        return text.toString();
+    }
+
+    /**
      * 仓库根：Maven 经系统属性 {@code xihan.repository.root} 传入；在 IDE 里直接运行时从工作目录向上找含 spec/ 的目录。
      *
      * @return 仓库根的绝对路径

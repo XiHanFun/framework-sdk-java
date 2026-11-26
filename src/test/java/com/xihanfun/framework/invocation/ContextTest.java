@@ -167,12 +167,17 @@ class ContextTest {
     @Test
     void unacceptableBaggageValuesAreDropped() throws Exception {
         var values = Vectors.read("primitives/baggage-keys.json").get("values");
-        for (String value : Vectors.strings(values.get("acceptable"))) {
+        // 孤立的代理项的样例以 UTF-16 码元列出（ADR-0321），与以字符串列出的同一条约束一起回放
+        List<String> acceptable = new ArrayList<>(Vectors.strings(values.get("acceptable")));
+        values.get("acceptableUtf16").forEach(sample -> acceptable.add(Vectors.utf16(sample.get("utf16"))));
+        List<String> unacceptable = new ArrayList<>(Vectors.strings(values.get("unacceptable")));
+        values.get("unacceptableUtf16").forEach(sample -> unacceptable.add(Vectors.utf16(sample.get("utf16"))));
+        for (String value : acceptable) {
             assertEquals(Optional.of(value), Context.builder().baggage(BaggageKeys.TENANT, value).build().tenant(), value);
             assertEquals(Optional.of(value), Context.background().withBaggage(BaggageKeys.CORRELATION, value).correlation(), value);
         }
         Context tenanted = Context.builder().baggage(BaggageKeys.TENANT, "t1").build();
-        for (String value : Vectors.strings(values.get("unacceptable"))) {
+        for (String value : unacceptable) {
             // 外部输入：丢弃不合的成员，已经给出的同名值保留（ADR-0235）
             assertEquals(Optional.empty(), Context.builder().baggage(BaggageKeys.TENANT, value).build().tenant(), "built: " + value);
             assertEquals(Optional.of("t1"), Context.builder().baggage(BaggageKeys.TENANT, "t1").baggage(BaggageKeys.TENANT, value).build().tenant(),

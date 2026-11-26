@@ -1,5 +1,6 @@
 package com.xihanfun.framework.primitives;
 
+import com.xihanfun.framework.internal.UnicodeText;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -66,10 +67,11 @@ public final class BaggageKeys {
     }
 
     /**
-     * 判断已登记键的值是否可以接受：非空、不超过 {@value #MAX_VALUE_LENGTH} 个字符、不含控制字符（ADR-0204）。
+     * 判断已登记键的值是否可以接受：非空、不超过 {@value #MAX_VALUE_LENGTH} 个字符、不含控制字符（ADR-0204）与孤立的代理项（ADR-0321）。
      *
      * <p>这些值会写进日志、审计与消息信封，换行能伪造日志行；载体在建调用上下文时丢弃不合的成员（{@code xihan.idempotency-key}
-     * 例外，由 idempotency 阶段以校验错误拒绝）。
+     * 例外，由 idempotency 阶段以校验错误拒绝）。孤立的代理项按 RFC-0001「孤立的代理项」判定：值出进程时编成 UTF-8，宽松的编码把它换成
+     * U+FFFD，只差在孤立代理项上的两个值到了下游是同一个；成对的代理项是平面以外的一个字符，照常合法。
      *
      * @param value 待判断的值；{@code null} 视为不可接受
      * @return 可以接受时为真
@@ -84,6 +86,6 @@ public final class BaggageKeys {
                 return false;
             }
         }
-        return true;
+        return !UnicodeText.hasLoneSurrogate(value);
     }
 }

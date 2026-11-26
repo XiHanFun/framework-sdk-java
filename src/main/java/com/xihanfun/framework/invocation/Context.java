@@ -289,7 +289,7 @@ public final class Context {
     /**
      * 派生一个多一个 Baggage 键值的上下文；格式合法但未登记的 {@code xihan.<name>} 键只在进程内有效，出进程时剥离。
      *
-     * <p>程序内逐项派生给已登记的键一个不可接受的值（{@link BaggageKeys#isAcceptableValue(String)}：空、超过 256 个 UTF-16 码元、含控制字符）
+     * <p>程序内逐项派生给已登记的键一个不可接受的值（{@link BaggageKeys#isAcceptableValue(String)}：空、超过 256 个 UTF-16 码元、含控制字符或孤立的代理项）
      * 是编程错误，抛出 {@link IllegalArgumentException}，与键不合文法时一样，不静默丢弃也不保留原值
      * （conventions/baggage-keys.md，ADR-0235）；{@code xihan.idempotency-key} 例外，原样保留，由 idempotency 阶段以校验错误拒绝。
      * 外部输入经 {@link Builder#baggage(String, String)} 进入，那里丢弃不合的成员。

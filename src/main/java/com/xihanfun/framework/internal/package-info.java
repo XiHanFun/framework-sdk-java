@@ -1,5 +1,6 @@
 /**
- * SDK 的内部实现：模块内各包共用的辅助类型，如规范所说的空白（RFC-0001「空白字符」）、枚举按线上名字的查找（{@code WireNames}）、
+ * SDK 的内部实现：模块内各包共用的辅助类型，如规范所说的空白（RFC-0001「空白字符」）与孤立的代理项（RFC-0001「孤立的代理项」，
+ * {@code UnicodeText}）、枚举按线上名字的查找（{@code WireNames}）、
  * 不止一个包要核对的文法（{@code Grammars}）、编不成 UTF-8 的文本的广义 UTF-8 写法（{@code GeneralizedUtf8}）与按值模型写出 JSON 值
  * （{@code JsonValueWriter}，原语的线上编码与插件协议的错误细节共用）。
  *
