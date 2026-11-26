@@ -35,9 +35,10 @@ import org.junit.jupiter.api.io.TempDir;
  * 宿主只继承 {@code handshake.md} §1 列出的环境变量，所以脚本里写 {@code java} 的绝对路径，类路径写进 Java 的参数文件。
  */
 class EchoConformanceTest {
-    /** 运行器的全部 14 个用例，按执行顺序（{@code spec/conformance/README.md}）。 */
+    /** 运行器的全部 15 个用例，按执行顺序（{@code spec/conformance/README.md}）。 */
     private static final List<String> CASES = List.of("handshake", "refusal", "session", "lifecycle", "order", "unknown-operation",
-            "declared-operations", "unavailable", "event", "unsubscribed", "stream", "configuration", "stop-early", "stdin");
+            "declared-operations", "unavailable", "event", "event-envelope", "unsubscribed", "stream", "configuration", "stop-early",
+            "stdin");
 
     private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
 
@@ -65,7 +66,9 @@ class EchoConformanceTest {
                 "--dir", directory.toString(), "--json", "--quiet",
                 "--config", argument("{\"greeting\":\"hello\"}"),
                 "--sample", argument("echoes.create={\"text\":\"conformance\"}"),
-                "--exclude", "echoes.crash"));
+                "--exclude", "echoes.crash",
+                // event-envelope 经回显信封的操作核对 data_schema 原样交给作者（invocation.md §7，ADR-0327）
+                "--envelopes", "events.list"));
         Process process = new ProcessBuilder(command).directory(conformance.toFile()).start();
         process.getOutputStream().close();
         CompletableFuture<String> stdout = read(process.getInputStream());

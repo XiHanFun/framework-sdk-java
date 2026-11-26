@@ -41,7 +41,9 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>{@code echoes.create}：回声文本，附上配置节 {@code XiHan:Echo} 的问候语与上下文里的租户、主体、关联 ID；文本为空是业务失败</li>
  *   <li>{@code echoes.relay}：经宿主回调调用另一个操作，把宿主的应答原样返回</li>
  *   <li>{@code echoes.crash}：故意让进程异常退出而不应答，宿主应记为崩溃并按退避重启；一致性测试排除它</li>
- *   <li>{@code events.list}：列出收到的 {@code echo.events} 事件的 ID（只留最近的 {@value #EVENT_CAPACITY} 个）</li>
+ *   <li>{@code events.list}：列出收到的 {@code echo.events} 事件的 ID 与作者拿到的信封（ID 与 {@code dataschema}，只留最近的
+ *       {@value #EVENT_CAPACITY} 个）；黑盒运行器以 {@code --envelopes events.list} 用它核对 {@code data_schema} 原样交给作者
+ *       （{@code invocation.md} §7）</li>
  * </ul>
  * 健康项 {@code echo} 总是健康。
  */
@@ -70,10 +72,10 @@ public final class EchoPlugin {
     /** 解析宿主转发回来的载荷。 */
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** 问候语与事件 ID 在同一把锁里读写。 */
+    /** 问候语与收到的信封在同一把锁里读写。 */
     private final ReentrantLock lock = new ReentrantLock();
     private String greeting = "";
-    private final ArrayDeque<String> events = new ArrayDeque<>();
+    private final ArrayDeque<ReceivedEnvelope> events = new ArrayDeque<>();
 
     /** {@code echoes.create} 的请求。 */
     record CreateRequest(String text) {
@@ -92,8 +94,12 @@ public final class EchoPlugin {
     record Empty() {
     }
 
-    /** {@code events.list} 的响应。 */
-    record EventList(List<String> ids) {
+    /** 作者在一次投递里拿到的信封：ID 与 {@code dataschema}，没有时为 {@code null}（写成 JSON 的 {@code null}）。 */
+    record ReceivedEnvelope(String id, String dataSchema) {
+    }
+
+    /** {@code events.list} 的响应：收到的事件 ID，与同样先后的信封 ID 和 {@code dataschema}。 */
+    record EventList(List<String> ids, List<ReceivedEnvelope> envelopes) {
     }
 
     /** 配置节 {@code XiHan:Echo}。 */
@@ -221,25 +227,26 @@ public final class EchoPlugin {
         return Result.ok(request);
     }
 
-    /** 列出收到的事件 ID。 */
+    /** 列出收到的事件 ID 与信封。 */
     private Result<EventList> list(Context context, Empty request) {
         lock.lock();
         try {
-            return Result.ok(new EventList(List.copyOf(events)));
+            List<ReceivedEnvelope> envelopes = List.copyOf(events);
+            return Result.ok(new EventList(envelopes.stream().map(ReceivedEnvelope::id).toList(), envelopes));
         } finally {
             lock.unlock();
         }
     }
 
-    /** 记录投递的事件；投递至少一次，同一个 ID 只记一次。 */
+    /** 记录投递的事件与作者拿到的 {@code dataschema}；投递至少一次，同一个 ID 只记一次。 */
     private Result<Unit> record(Context context, Envelope envelope, int attempt) {
         lock.lock();
         try {
-            if (!events.contains(envelope.id())) {
+            if (events.stream().noneMatch(received -> received.id().equals(envelope.id()))) {
                 if (events.size() == EVENT_CAPACITY) {
                     events.removeFirst();
                 }
-                events.addLast(envelope.id());
+                events.addLast(new ReceivedEnvelope(envelope.id(), envelope.dataSchema().orElse(null)));
             }
         } finally {
             lock.unlock();
