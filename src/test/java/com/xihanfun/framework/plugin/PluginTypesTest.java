@@ -56,14 +56,17 @@ class PluginTypesTest {
             assertEquals(message.get("code").asText(), CODES.get(key), key);
             assertEquals(new TreeSet<>(Vectors.strings(message.get("arguments"))), new TreeSet<>(MessageTemplate.placeholdersOf(english.get(key))), key);
         }
-        assertEquals(keys, new TreeSet<>(english.keySet()), "the catalog holds exactly the specified keys");
+        // 另加 Host.publish 在本地报出的 messaging.envelope.invalid（RFC-0009「信封」，invocation.md §5），模板与宿主的消息目录逐字相同
+        keys.add(PluginMessages.ENVELOPE_INVALID);
+        assertEquals("The envelope is invalid: {reason}", english.get(PluginMessages.ENVELOPE_INVALID));
+        assertEquals(keys, new TreeSet<>(english.keySet()), "the catalog holds exactly the specified keys and the local envelope key");
         Set<String> constants = new TreeSet<>();
         for (Field field : PluginMessages.class.getFields()) {
             if (Modifier.isStatic(field.getModifiers()) && field.getType() == String.class && !field.getName().equals("CATALOG_NAME")) {
                 constants.add((String) field.get(null));
             }
         }
-        assertEquals(keys, constants, "every constant is a specified key");
+        assertEquals(keys, constants, "every constant is a key of the catalog");
         // 固定的 reason 文本与运行时写出的相同
         Set<String> reasons = new TreeSet<>();
         vectors.get("reasons").forEach(reason -> reasons.add(reason.get("reason").asText()));
@@ -85,6 +88,16 @@ class PluginTypesTest {
                         "no invisible characters in " + locale.getKey() + " " + template.getKey());
             }
         }
+    }
+
+    @Test
+    void theLocalEnvelopeErrorRendersFromTheBuiltInCatalog() {
+        // Host.publish 在本地拒绝编不成 UTF-8 的 data 时的错误（ADR-0315），插件不经宿主也能按区域渲染
+        Map<String, Object> details = Map.of("reason", Host.UNENCODABLE_DATA);
+        assertEquals(Optional.of("The envelope is invalid: the data has a lone surrogate and cannot be encoded as UTF-8"),
+                PluginMessages.catalog().messages().resolve(PluginMessages.ENVELOPE_INVALID, "en-US", details));
+        assertEquals(Optional.of("信封不合法：x"), PluginMessages.catalog().messages().resolve(PluginMessages.ENVELOPE_INVALID, "zh-CN",
+                Map.of("reason", "x")));
     }
 
     @Test

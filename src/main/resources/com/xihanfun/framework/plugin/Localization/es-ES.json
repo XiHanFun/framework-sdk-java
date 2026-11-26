@@ -1,4 +1,5 @@
 {
+  "messaging.envelope.invalid": "El sobre no es válido: {reason}",
   "plugins.callback.denied": "El plugin '{id}' no puede usar el permiso '{permission}': debe declararse en el manifiesto y concederlo el host.",
   "plugins.callback.session_invalid": "El token de sesión del plugin falta o no es válido.",
   "plugins.callback.tenant_denied": "El plugin '{id}' no puede actuar en el inquilino '{tenant}': una devolución de llamada solo puede llevar el inquilino de una llamada que el host haya entregado al plugin.",

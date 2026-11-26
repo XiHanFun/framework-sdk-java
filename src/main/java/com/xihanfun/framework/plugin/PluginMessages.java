@@ -10,6 +10,10 @@ import java.util.Map;
  * <p>这些键、参数与错误码是规范定下的、SDK 运行时与宿主共用的键（向量 {@code plugin-messages.json}），参数就是错误的 {@code details}，
  * 不另加成员；{@code id} 一律是插件的清单 ID。宿主有这些键的目录，SDK 不随握手发送它们（{@code handshake.md} §3 第 6 条），
  * 带这些键的错误交给宿主时 {@code text} 留空、由宿主翻译成调用方的语言。本目录供插件在本地渲染，例如写日志或交给不经宿主的调用方。
+ *
+ * <p>另有一个不在 {@code plugin-messages.json} 里的键 {@value #ENVELOPE_INVALID}：它是消息子系统的键（RFC-0009「信封」），
+ * {@code Host.publish} 在本地拒绝编不成 UTF-8 的 {@code data} 时用它（{@code invocation.md} §5，ADR-0315），模板与宿主
+ * 消息目录里的同一个键逐字相同，收进本目录是为了插件在本地也能渲染这个错误。
  */
 public final class PluginMessages {
     /** 目录名。 */
@@ -35,6 +39,9 @@ public final class PluginMessages {
 
     /** 投递找不到（主题，方式，类型）匹配的订阅；参数 {@code id}、{@code topic}、{@code type}、{@code mode}，错误码 {@code KERNEL_NOTFOUND_001}。 */
     public static final String EVENT_UNSUBSCRIBED = "plugins.event.unsubscribed";
+
+    /** 发布的信封在本地就不合法（以文本设置的 {@code data} 编不成 UTF-8）；参数 {@code reason}，错误码 {@code MESSAGING_VALIDATION_002}（RFC-0009「信封」）。 */
+    public static final String ENVELOPE_INVALID = "messaging.envelope.invalid";
 
     /** 内置目录；类首次使用时读语言文件。 */
     private static final PluginCatalog CATALOG = load();

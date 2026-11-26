@@ -1,4 +1,5 @@
 {
+  "messaging.envelope.invalid": "エンベロープが不正です: {reason}",
   "plugins.callback.denied": "プラグイン '{id}' は権限 '{permission}' を使用できません。権限はマニフェストで宣言され、ホストから付与されている必要があります。",
   "plugins.callback.session_invalid": "プラグインのセッショントークンがないか無効です。",
   "plugins.callback.tenant_denied": "プラグイン '{id}' はテナント '{tenant}' で実行できません。コールバックが持てるのは、ホストがプラグインに渡した呼び出しのテナントだけです。",

@@ -1,4 +1,5 @@
 {
+  "messaging.envelope.invalid": "信封不合法：{reason}",
   "plugins.callback.denied": "插件 '{id}' 不能使用权限 '{permission}'：权限须在清单中声明并由宿主授予。",
   "plugins.callback.session_invalid": "插件会话令牌缺失或无效。",
   "plugins.callback.tenant_denied": "插件 '{id}' 不能在租户 '{tenant}' 中执行：回调只能带宿主交给插件处理的调用的租户。",

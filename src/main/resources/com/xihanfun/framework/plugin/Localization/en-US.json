@@ -1,4 +1,5 @@
 {
+  "messaging.envelope.invalid": "The envelope is invalid: {reason}",
   "plugins.callback.denied": "Plugin '{id}' may not use permission '{permission}': it must be declared in the manifest and granted by the host.",
   "plugins.callback.session_invalid": "The plugin session token is missing or invalid.",
   "plugins.callback.tenant_denied": "Plugin '{id}' may not act in tenant '{tenant}': a callback can only carry the tenant of a call the host has handed to the plugin.",

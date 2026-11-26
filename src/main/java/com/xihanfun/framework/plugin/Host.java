@@ -82,9 +82,6 @@ public final class Host {
     /** 信封不合法或无法转换的错误码（{@code conventions/error-codes.md}），与宿主转换不了信封时相同。 */
     static final String ENVELOPE_INVALID = "MESSAGING_VALIDATION_002";
 
-    /** 信封不合法的消息键（RFC-0009），参数 {@code reason}。 */
-    static final String ENVELOPE_INVALID_KEY = "messaging.envelope.invalid";
-
     /** 以文本设置的 {@code data} 编不成 UTF-8 时 {@code reason} 的固定文本（{@code invocation.md} §5，ADR-0315）。 */
     static final String UNENCODABLE_DATA = "the data has a lone surrogate and cannot be encoded as UTF-8";
 
@@ -271,7 +268,7 @@ public final class Host {
 
     /** 以文本设置的 {@code data} 编不成 UTF-8 的那一项的错误：与宿主转换不了信封时同一个码与键（{@code invocation.md} §5，ADR-0315）。 */
     private static Error unencodableData() {
-        return Error.validation(ENVELOPE_INVALID, ENVELOPE_INVALID_KEY, Map.of("reason", UNENCODABLE_DATA));
+        return Error.validation(ENVELOPE_INVALID, PluginMessages.ENVELOPE_INVALID, Map.of("reason", UNENCODABLE_DATA));
     }
 
     private static List<Result<Unit>> every(int count, Result<Unit> result) {

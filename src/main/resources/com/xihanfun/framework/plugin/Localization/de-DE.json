@@ -1,4 +1,5 @@
 {
+  "messaging.envelope.invalid": "Der Umschlag ist ungültig: {reason}",
   "plugins.callback.denied": "Das Plugin '{id}' darf die Berechtigung '{permission}' nicht verwenden: Sie muss im Manifest deklariert und vom Host erteilt sein.",
   "plugins.callback.session_invalid": "Das Sitzungstoken des Plugins fehlt oder ist ungültig.",
   "plugins.callback.tenant_denied": "Das Plugin '{id}' darf nicht im Mandanten '{tenant}' handeln: Ein Rückruf kann nur den Mandanten eines Aufrufs tragen, den der Host an das Plugin übergeben hat.",
