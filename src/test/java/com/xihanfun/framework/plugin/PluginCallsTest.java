@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonRawValue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.protobuf.ByteString;
 import com.xihanfun.framework.Vectors;
@@ -195,6 +196,51 @@ class PluginCallsTest {
             PluginProto.InvokeResponse written = plugin.stub().invoke(invokeRequest("samples.text", "{}"));
             assertTrue(written.getStatus().getOk(), written.toString());
             assertEquals(text, RunningPlugin.JSON.readValue(written.getPayload().toByteArray(), EchoResponse.class).text());
+        }
+    }
+
+    /** 原样嵌进响应的 JSON 文本。 */
+    record Raw(@JsonRawValue String raw) {
+    }
+
+    /** {@code depth} 层嵌套的空列表，最外层是第 1 层。 */
+    private static Object nestedLists(int depth) {
+        Object value = List.of();
+        for (int level = 1; level < depth; level++) {
+            value = List.of(value);
+        }
+        return value;
+    }
+
+    @Test
+    void responsesThatDoNotPassTheJsonTextChecksFailInThePlugin() throws Exception {
+        // 写出的整段文本要过共同检查（invocation.md §1「插件一侧写出应答」，ADR-0319）：嵌套超过 64 层或有重复的成员名经
+        // Status.error 报 unhandled_exception，没有参数、不带 inner，payload 为空，不交给宿主去拒绝
+        Map<String, Object> responses = Map.of(
+                // 响应对象是第 1 层，里面 64 层的列表在根之下是 65 层
+                "samples.echo", Map.of("items", nestedLists(64)),
+                "samples.fail", new Raw("[".repeat(64) + "]".repeat(64)),
+                "samples.relay", new Raw("{\"a\":1,\"a\":2}"),
+                // 恰好 64 层照常写出
+                "samples.text", nestedLists(64));
+        OperationRegistry registry = new OperationRegistry();
+        responses.forEach((id, value) -> registry.add(OperationContract.of(id), Empty.class, Object.class, (context, request) -> Result.ok(value)));
+        try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().operations(registry))) {
+            plugin.ready("{}");
+            for (String id : List.of("samples.echo", "samples.fail", "samples.relay")) {
+                PluginProto.InvokeResponse failed = plugin.stub().invoke(invokeRequest(id, "{}"));
+                assertFalse(failed.getStatus().getOk(), id);
+                assertTrue(failed.getPayload().isEmpty(), id);
+                PluginProto.Error error = failed.getStatus().getError();
+                assertEquals("KERNEL_UNEXPECTED_001", error.getCode(), id);
+                assertEquals("kernel.invocation.unhandled_exception", error.getMessageKey(), id);
+                assertEquals("", error.getText(), id);
+                assertEquals("", error.getDetails(), id);
+                assertFalse(error.hasInner(), id);
+            }
+            PluginProto.InvokeResponse written = plugin.stub().invoke(invokeRequest("samples.text", "{}"));
+            assertTrue(written.getStatus().getOk(), written.toString());
+            assertEquals("[".repeat(64) + "]".repeat(64), written.getPayload().toStringUtf8());
         }
     }
 

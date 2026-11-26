@@ -181,6 +181,10 @@ public final class OperationJson {
      * <p>字符串（成员名与值，含映射的键）里有孤立的代理项同样写不出，错误不带 {@code inner}（ADR-0318）：Jackson 把值与映射的键里的
      * 孤立代理项写成 Unicode 转义，由同一道检查拦下；{@code @JsonProperty} 这类预先编码的成员名由 Jackson 先抛出，
      * 原因链里没有框架异常。
+     *
+     * <p>这道检查核对的是写出的整段文本（ADR-0319）：嵌套超过 64 层（{@code @JsonRawValue} 这类原样嵌进去的文本也算，从响应的根算起）
+     * 或任何一层有重复的成员名（自定义序列化器两次写出同名成员、原样嵌进去的文本）同样写不出，错误不带 {@code inner}。Jackson
+     * 写出时不查重复成员，嵌套上限也远大于 64，所以不靠它的写出约束。
      */
     static Result<byte[]> encode(ObjectMapper mapper, String id, Object value) {
         byte[] payload;
@@ -193,7 +197,8 @@ public final class OperationJson {
                     .orElseGet(InvocationErrors::unhandledException));
         }
         if (JsonText.check(payload).isPresent()) {
-            LOGGER.log(System.Logger.Level.ERROR, "The response of the operation '" + id + "' is not JSON (NaN, an infinity or a lone surrogate).");
+            LOGGER.log(System.Logger.Level.ERROR, "The response of the operation '" + id + "' does not pass the JSON text checks "
+                    + "(NaN, an infinity, a lone surrogate, more than 64 levels of nesting or a duplicate member).");
             return Result.fail(InvocationErrors.unhandledException());
         }
         return Result.ok(payload);

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonRawValue;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
@@ -19,6 +20,7 @@ import com.xihanfun.framework.primitives.FrameworkException;
 import com.xihanfun.framework.primitives.PipelineStage;
 import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
+import java.io.IOException;
 import java.io.Serial;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -67,8 +69,62 @@ class ResponseEncodingTest {
         }
     }
 
+    /** 自定义序列化器两次写出同名的成员。 */
+    @JsonSerialize(using = Twice.Serializer.class)
+    record Twice() {
+        static final class Serializer extends StdSerializer<Twice> {
+            @Serial
+            private static final long serialVersionUID = 1L;
+
+            Serializer() {
+                super(Twice.class);
+            }
+
+            @Override
+            public void serialize(Twice value, JsonGenerator generator, SerializerProvider provider) throws IOException {
+                generator.writeStartObject();
+                generator.writeFieldName("a");
+                generator.writeNumber(1);
+                generator.writeFieldName("a");
+                generator.writeNumber(2);
+                generator.writeEndObject();
+            }
+        }
+    }
+
+    /** 原样嵌进响应的 JSON 文本。 */
+    record Raw(@JsonRawValue String raw) {
+    }
+
+    /** 预期照常写出的响应与它的文本。 */
+    record Written(Object value, String payload) {
+    }
+
     private static OperationInvoker invoker(OperationRegistry registry, PipelineBuilder pipeline) {
         return new OperationInvoker(registry, pipeline);
+    }
+
+    /** {@code depth} 层嵌套的列表，最外层是第 1 层，最里面一层的元素是 {@code innermost}。 */
+    private static Object nestedLists(int depth, Object... innermost) {
+        Object value = List.of(innermost);
+        for (int level = 1; level < depth; level++) {
+            value = List.of(value);
+        }
+        return value;
+    }
+
+    /** {@code depth} 层嵌套的映射，最外层是第 1 层，最里面是空映射。 */
+    private static Object nestedMaps(int depth) {
+        Object value = Map.of();
+        for (int level = 1; level < depth; level++) {
+            value = Map.of("a", value);
+        }
+        return value;
+    }
+
+    /** {@code depth} 层嵌套的空数组的文本。 */
+    private static String arrays(int depth) {
+        return "[".repeat(depth) + "]".repeat(depth);
     }
 
     @Test
@@ -156,6 +212,56 @@ class ResponseEncodingTest {
         JsonNode label = OperationJson.readTree(written.payloadText().orElseThrow().getBytes(StandardCharsets.UTF_8));
         assertEquals(text, label.get("label").textValue());
         assertEquals("é", label.get("tags").get(0).textValue());
+    }
+
+    @Test
+    void responsesThatDoNotPassTheJsonTextChecksAreNotWritten() {
+        // 写出的整段文本要过 RFC-0001「JSON 文本」的共同检查（RFC-0011 规则 10「编码」，ADR-0319）：嵌套超过 64 层（原样嵌进去的
+        // 文本也算，从响应的根算起）或任何一层有重复的成员名同样写不出，以 unhandled_exception 结束，不带 inner，没有载荷。
+        // Jackson 写出时不查重复成员，嵌套上限远大于 64，由写出之后的 JSON 文本检查拦下
+        Map<String, Object> unwritable = new LinkedHashMap<>();
+        unwritable.put("depths.lists", nestedLists(65));
+        unwritable.put("depths.scalar", nestedLists(65, 1));
+        unwritable.put("depths.maps", nestedMaps(65));
+        // 响应对象是第 1 层：嵌进去的 64 层数组在根之下是 65 层
+        unwritable.put("depths.raw", new Raw(arrays(64)));
+        unwritable.put("members.serializer", new Twice());
+        unwritable.put("members.nested", Map.of("outer", List.of(new Twice())));
+        unwritable.put("members.raw", new Raw("{\"a\":1,\"a\":2}"));
+        unwritable.put("members.raw-apart", new Raw("[{\"b\":{\"a\":1,\"c\":2,\"a\":3}}]"));
+        Map<String, Written> writable = new LinkedHashMap<>();
+        writable.put("depths.lists-at-limit", new Written(nestedLists(64), arrays(64)));
+        writable.put("depths.scalar-at-limit", new Written(nestedLists(64, 1), "[".repeat(64) + "1" + "]".repeat(64)));
+        writable.put("depths.maps-at-limit", new Written(nestedMaps(64), "{\"a\":".repeat(63) + "{}" + "}".repeat(63)));
+        writable.put("depths.raw-at-limit", new Written(new Raw(arrays(63)), "{\"raw\":" + arrays(63) + "}"));
+        // 不同层、不同对象里的同名成员不算重复
+        writable.put("members.distinct", new Written(new Raw("{\"a\":{\"a\":1},\"b\":[{\"a\":2},{\"a\":3}]}"),
+                "{\"raw\":{\"a\":{\"a\":1},\"b\":[{\"a\":2},{\"a\":3}]}}"));
+        OperationRegistry registry = new OperationRegistry();
+        for (Map.Entry<String, Object> entry : unwritable.entrySet()) {
+            Object value = entry.getValue();
+            registry.add(OperationContract.of(entry.getKey()), Unit.class, Object.class, (context, request) -> Result.ok(value));
+        }
+        for (Map.Entry<String, Written> entry : writable.entrySet()) {
+            Object value = entry.getValue().value();
+            registry.add(OperationContract.of(entry.getKey()), Unit.class, Object.class, (context, request) -> Result.ok(value));
+        }
+        OperationInvoker invoker = invoker(registry, new PipelineBuilder());
+        for (String id : unwritable.keySet()) {
+            OperationResponse response = invoker.invoke(Context.background(), OperationRequest.of(id));
+            Error error = response.outcome().error().orElseThrow(() -> new AssertionError(id));
+            assertEquals("KERNEL_UNEXPECTED_001", error.code(), id);
+            assertEquals(Optional.of("kernel.invocation.unhandled_exception"), error.messageKey(), id);
+            assertEquals(Map.of(), error.details(), id);
+            assertEquals(Optional.empty(), error.inner(), id);
+            assertEquals(Optional.empty(), response.payloadText(), id);
+        }
+        // 恰好 64 层照常写出：最里面有值也一样，差一层都不行
+        for (Map.Entry<String, Written> entry : writable.entrySet()) {
+            OperationResponse written = invoker.invoke(Context.background(), OperationRequest.of(entry.getKey()));
+            assertTrue(written.isOk(), () -> entry.getKey() + ": " + written.outcome());
+            assertEquals(Optional.of(entry.getValue().payload()), written.payloadText(), entry.getKey());
+        }
     }
 
     @Test
