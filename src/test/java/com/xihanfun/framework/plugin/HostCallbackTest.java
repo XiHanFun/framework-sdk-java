@@ -626,6 +626,41 @@ class HostCallbackTest {
     }
 
     @Test
+    void afterTheClientIsClosedCallbacksAreUnavailableAfterTheEncodingChecks() throws Exception {
+        // invocation.md §5（ADR-0328）：释放回调客户端之后的回调不发请求、不重新连接，结果是 plugins.host.unavailable；
+        // 它是发出这一步本身，排在本地核对与载荷、data 的编码之后
+        Outcome invalidPayload = new Outcome(false, "KERNEL_VALIDATION_001", "kernel.operation.invalid_payload",
+                "{\"id\":\"orders.create\",\"reason\":\"$\"}", "");
+        Outcome invalidData = new Outcome(false, "MESSAGING_VALIDATION_002", "messaging.envelope.invalid",
+                "{\"reason\":\"the data has a lone surrogate and cannot be encoded as UTF-8\"}", "");
+        Outcome closed = new Outcome(false, PluginErrors.UNAVAILABLE, PluginMessages.HOST_UNAVAILABLE,
+                "{\"id\":\"xihan.tests.sample\",\"reason\":\"Unavailable: the plugin runtime has stopped\"}", "");
+        try (RunningPlugin plugin = start(hostAddress())) {
+            assertTrue(relay(plugin, "orders.create").ok(), "the first callback dials the host");
+            int calls = sessions.size();
+            plugin.runtime.host.close();
+
+            assertEquals(closed, relay(plugin, "orders.create"));
+            assertEquals(closed, call(plugin, "samples.text", new Text("orders.create", "pair", null, null), null, Outcome.class));
+            // 载荷编码不成时是编码的错误，与客户端是否已关闭无关
+            assertEquals(invalidPayload, call(plugin, "samples.text", new Text("orders.create", "high", null, null), null, Outcome.class));
+            // 编码不成的那一项是 messaging.envelope.invalid，其余是已关闭；每一项都编码不成时每一项都是编码的错误
+            List<String> two = List.of("samples.a", "samples.b");
+            assertEquals(List.of(invalidData, closed),
+                    call(plugin, "samples.publish-text", new PublishText(two, List.of("high", "plain"), null, null), null, Published.class).results());
+            assertEquals(List.of(invalidData, invalidData),
+                    call(plugin, "samples.publish-text", new PublishText(two, List.of("low", "trailing"), null, null), null, Published.class).results());
+            // 整批的核对与截止时间仍在前面
+            assertEquals(PluginMessages.CALLBACK_TENANT_DENIED,
+                    call(plugin, "samples.text", new Text("orders.create", "pair", null, "t2"), "t1", Outcome.class).key());
+            Outcome expired = new Outcome(false, "KERNEL_TIMEOUT_001", "kernel.invocation.deadline_exceeded", "", "");
+            assertEquals(List.of(expired, expired),
+                    call(plugin, "samples.publish-text", new PublishText(two, List.of("high", "plain"), "expired", null), null, Published.class).results());
+            assertEquals(calls, sessions.size(), "nothing reaches the host and the client does not dial again");
+        }
+    }
+
+    @Test
     void theFirstEndpointTheSdkCanDialIsChosenAndKept() throws Exception {
         // 宿主的偏好在前：命名管道本 SDK 连不了，取后面的回环 TCP（handshake.md §4）
         try (RunningPlugin plugin = start("npipe \\\\.\\pipe\\xihan-host-test;" + hostAddress())) {
