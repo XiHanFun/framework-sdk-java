@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
@@ -21,7 +22,9 @@ import com.xihanfun.framework.primitives.Unit;
 import java.io.Serial;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -36,6 +39,14 @@ class ResponseEncodingTest {
 
     /** 类型化的浮点成员。 */
     record Reading(double value) {
+    }
+
+    /** 带文本与数组的响应。 */
+    record Label(String label, List<String> tags) {
+    }
+
+    /** 成员名里有孤立代理项的响应。 */
+    record Renamed(@JsonProperty("count" + (char) 0xD800) int count) {
     }
 
     /** 序列化时抛出框架异常的值。 */
@@ -106,6 +117,45 @@ class ResponseEncodingTest {
         assertEquals("ORDERS_UNEXPECTED_001", refused.inner().orElseThrow().code(), "the framework error goes into inner");
         // 类型化入口不编码：NaN 原样交给调用方
         assertTrue(Double.isNaN(invoker.invoke(Context.background(), "readings.take", Unit.VALUE, Reading.class).value().orElseThrow().value()));
+    }
+
+    @Test
+    void responsesThatAreNotValidJsonTextAreNotWritten() {
+        // 响应里的字符串写不成合法的 JSON 文本即写不出（RFC-0011 规则 10「编码」，ADR-0318）：值、成员名、映射的键与数组元素里的
+        // 孤立代理项都以 unhandled_exception 结束，不带 inner，没有载荷。Jackson 把值与映射的键里的孤立代理项写成 Unicode
+        // 转义，由写出之后的 JSON 文本检查拦下；@JsonProperty 的成员名预先编码，Jackson 先抛出（拆开的代理项），两条路的错误相同
+        String high = String.valueOf((char) 0xD800);
+        String low = String.valueOf((char) 0xDC00);
+        Map<String, Object> unwritable = new LinkedHashMap<>();
+        unwritable.put("labels.value", new Label("a" + high, List.of()));
+        unwritable.put("labels.reversed", new Label(low + high, List.of()));
+        unwritable.put("labels.element", new Label("a", List.of("b", low)));
+        unwritable.put("labels.member", new Renamed(1));
+        unwritable.put("labels.key", Map.of(high, 1));
+        unwritable.put("labels.nested-key", Map.of("a", List.of(Map.of("b" + low, "c"))));
+        String text = "中文" + new String(Character.toChars(0x1F600)) + (char) 0xFFFD;
+        OperationRegistry registry = new OperationRegistry();
+        for (Map.Entry<String, Object> entry : unwritable.entrySet()) {
+            Object value = entry.getValue();
+            registry.add(OperationContract.of(entry.getKey()), Unit.class, Object.class, (context, request) -> Result.ok(value));
+        }
+        registry.add(OperationContract.of("labels.text"), Unit.class, Label.class, (context, request) -> Result.ok(new Label(text, List.of("é"))));
+        OperationInvoker invoker = invoker(registry, new PipelineBuilder());
+        for (String id : unwritable.keySet()) {
+            OperationResponse response = invoker.invoke(Context.background(), OperationRequest.of(id));
+            Error error = response.outcome().error().orElseThrow(() -> new AssertionError(id));
+            assertEquals("KERNEL_UNEXPECTED_001", error.code(), id);
+            assertEquals(Optional.of("kernel.invocation.unhandled_exception"), error.messageKey(), id);
+            assertEquals(Map.of(), error.details(), id);
+            assertEquals(Optional.empty(), error.inner(), id);
+            assertEquals(Optional.empty(), response.payloadText(), id);
+        }
+        // 多字节文本与真正的 U+FFFD 照常写出
+        OperationResponse written = invoker.invoke(Context.background(), OperationRequest.of("labels.text"));
+        assertTrue(written.isOk(), () -> written.outcome().toString());
+        JsonNode label = OperationJson.readTree(written.payloadText().orElseThrow().getBytes(StandardCharsets.UTF_8));
+        assertEquals(text, label.get("label").textValue());
+        assertEquals("é", label.get("tags").get(0).textValue());
     }
 
     @Test

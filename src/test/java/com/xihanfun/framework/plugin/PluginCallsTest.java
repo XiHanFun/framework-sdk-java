@@ -164,6 +164,40 @@ class PluginCallsTest {
         }
     }
 
+    @Test
+    void responsesThatAreNotValidJsonTextFailInThePlugin() throws Exception {
+        // 类型化的应答写不成合法的 JSON 文本即写不出（invocation.md §1「插件一侧写出应答」，ADR-0318）：值、映射的键与数组元素里的
+        // 孤立代理项经 Status.error 报 unhandled_exception，没有参数、不带 inner，payload 为空，不写成转义交给宿主
+        String high = String.valueOf((char) 0xD800);
+        String low = String.valueOf((char) 0xDC00);
+        String text = "中文" + new String(Character.toChars(0x1F600)) + (char) 0xFFFD;
+        Map<String, Object> responses = Map.of(
+                "samples.echo", new EchoResponse("a" + high),
+                "samples.fail", Map.of(low, "b"),
+                "samples.context", List.of("c", low + high),
+                "samples.text", new EchoResponse(text));
+        OperationRegistry registry = new OperationRegistry();
+        responses.forEach((id, value) -> registry.add(OperationContract.of(id), Empty.class, Object.class, (context, request) -> Result.ok(value)));
+        try (RunningPlugin plugin = RunningPlugin.start(directory, PluginOptions.builder().operations(registry))) {
+            plugin.ready("{}");
+            for (String id : List.of("samples.echo", "samples.fail", "samples.context")) {
+                PluginProto.InvokeResponse failed = plugin.stub().invoke(invokeRequest(id, "{}"));
+                assertFalse(failed.getStatus().getOk(), id);
+                assertTrue(failed.getPayload().isEmpty(), id);
+                PluginProto.Error error = failed.getStatus().getError();
+                assertEquals("KERNEL_UNEXPECTED_001", error.getCode(), id);
+                assertEquals("kernel.invocation.unhandled_exception", error.getMessageKey(), id);
+                assertEquals("", error.getText(), id);
+                assertEquals("", error.getDetails(), id);
+                assertFalse(error.hasInner(), id);
+            }
+            // 多字节文本与真正的 U+FFFD 照常写出
+            PluginProto.InvokeResponse written = plugin.stub().invoke(invokeRequest("samples.text", "{}"));
+            assertTrue(written.getStatus().getOk(), written.toString());
+            assertEquals(text, RunningPlugin.JSON.readValue(written.getPayload().toByteArray(), EchoResponse.class).text());
+        }
+    }
+
     private static Seen context(RunningPlugin plugin, PluginProto.InvocationMetadata metadata, Duration grpc) throws Exception {
         var stub = grpc == null ? plugin.stub() : plugin.stub().withDeadlineAfter(grpc.toMillis(), TimeUnit.MILLISECONDS);
         PluginProto.InvokeResponse response = stub.invoke(invokeRequest("samples.context", "{}").toBuilder().setMetadata(metadata).build());

@@ -177,6 +177,10 @@ public final class OperationJson {
      * 以 {@code KERNEL_UNEXPECTED_001} + {@code kernel.invocation.unhandled_exception} 结束，异常是框架异常时它的错误放进 {@code inner}，
      * 不抛给调用方。NaN 与无穷不写成字符串：编码时关掉 {@code WRITE_NAN_AS_STRINGS}，写出的文本再过共同的 JSON 文本检查，
      * Jackson 写出的 {@code NaN} 这类非 JSON 写法因此失败。
+     *
+     * <p>字符串（成员名与值，含映射的键）里有孤立的代理项同样写不出，错误不带 {@code inner}（ADR-0318）：Jackson 把值与映射的键里的
+     * 孤立代理项写成 Unicode 转义，由同一道检查拦下；{@code @JsonProperty} 这类预先编码的成员名由 Jackson 先抛出，
+     * 原因链里没有框架异常。
      */
     static Result<byte[]> encode(ObjectMapper mapper, String id, Object value) {
         byte[] payload;
