@@ -832,4 +832,44 @@ class HostCallbackTest {
         String pair = new String(Character.toChars(0x1F600));
         assertEquals(Map.of("a", pair), Wire.readDetails("{\"a\":\"" + pair + "\"}"), "a surrogate pair is one character");
     }
+
+    /** 嵌套 {@code levels} 层的对象：1 层是 {@code {}}。 */
+    private static Map<String, Object> nested(int levels) {
+        Map<String, Object> value = Map.of();
+        for (int level = 1; level < levels; level++) {
+            value = Map.of("a", value);
+        }
+        return value;
+    }
+
+    @Test
+    void detailsThatCannotBeWrittenAreLeftOutAndTheRestIsWritten() {
+        // invocation.md §3「写出 Error」（ADR-0320）：细节有孤立的代理项或写出的文本超过 64 层时这个错误不带细节，其余字段照写；内部错误的细节各自核对
+        String high = String.valueOf((char) 0xD800);
+        String low = String.valueOf((char) 0xDC00);
+        Error inner = Error.validation("SAMPLES_VALIDATION_002", "samples.inner", Map.of("id", "i1"));
+        for (Map<String, Object> details : List.of(Map.<String, Object>of("a", high), Map.<String, Object>of(low, 1),
+                Map.<String, Object>of("list", List.of("x", low + high)), nested(65))) {
+            PluginProto.Error written = Wire.error(Error.unexpected("SAMPLES_UNEXPECTED_001", "samples.failed", details, inner));
+            assertEquals("", written.getDetails(), "no details: " + details);
+            assertEquals("SAMPLES_UNEXPECTED_001", written.getCode());
+            assertEquals("samples.failed", written.getMessageKey());
+            assertEquals("{\"id\":\"i1\"}", written.getInner().getDetails(), "the inner details are checked on their own");
+
+            PluginProto.Error literal = Wire.error(Error.literal("SAMPLES_CONFLICT_001", "stale", details));
+            assertEquals("", literal.getDetails());
+            assertEquals("stale", literal.getText(), "the text of a free-text error is still written");
+
+            PluginProto.Error outer = Wire.error(Error.unexpected("SAMPLES_UNEXPECTED_001", "samples.failed", Map.of("id", "o1"),
+                    Error.literal("SAMPLES_VALIDATION_002", "inner", details)));
+            assertEquals("{\"id\":\"o1\"}", outer.getDetails(), "the outer details are kept");
+            assertEquals("", outer.getInner().getDetails());
+            assertEquals("inner", outer.getInner().getText());
+        }
+        // 64 层的细节照写；成对的代理项是一个字符
+        assertEquals("{\"a\":".repeat(63) + "{}" + "}".repeat(63),
+                Wire.error(Error.literal("SAMPLES_CONFLICT_001", "stale", nested(64))).getDetails());
+        String pair = new String(Character.toChars(0x1F600));
+        assertEquals("{\"a\":\"" + pair + "\"}", Wire.error(Error.literal("SAMPLES_CONFLICT_001", "stale", Map.of("a", pair))).getDetails());
+    }
 }

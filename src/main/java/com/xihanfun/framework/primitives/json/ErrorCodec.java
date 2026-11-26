@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import com.xihanfun.framework.internal.JsonValueWriter;
 import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.primitives.Error;
 import java.io.IOException;
@@ -24,6 +25,9 @@ final class ErrorCodec {
     /**
      * 写出 {@code code}、{@code message}、{@code messageKey}、{@code details}、{@code inner}：没有键、细节为空、没有内部错误时不写，
      * 不写 {@code null}；成员顺序固定。
+     *
+     * <p>写出是严格的（RFC-0001「写出与转交」，ADR-0320）：文案、细节或内部错误里有孤立的代理项，或从错误的根算起嵌套超过 64 层时写不出，
+     * 抛出 {@link com.fasterxml.jackson.databind.JsonMappingException}，什么也不写。
      */
     static final class Serializer extends StdSerializer<Error> {
         @Serial
@@ -35,22 +39,33 @@ final class ErrorCodec {
 
         @Override
         public void serialize(Error error, JsonGenerator generator, SerializerProvider provider) throws IOException {
-            generator.writeStartObject();
-            generator.writeStringField("code", error.code());
-            generator.writeStringField("message", error.message());
-            if (error.messageKey().isPresent()) {
-                generator.writeStringField("messageKey", error.messageKey().get());
-            }
-            if (!error.details().isEmpty()) {
-                generator.writeFieldName("details");
-                JsonTrees.write(generator, error.details());
-            }
-            if (error.inner().isPresent()) {
-                generator.writeFieldName("inner");
-                serialize(error.inner().get(), generator, provider);
-            }
-            generator.writeEndObject();
+            StrictWrites.write(generator, provider, "error", buffer -> write(error, buffer));
         }
+    }
+
+    /**
+     * 写出一个错误与它的内部错误，不另做核对：由外层的 {@link StrictWrites} 统一核对整段文本。
+     *
+     * @param error 错误
+     * @param generator 写出器
+     * @throws IOException 写出失败
+     */
+    static void write(Error error, JsonGenerator generator) throws IOException {
+        generator.writeStartObject();
+        generator.writeStringField("code", error.code());
+        generator.writeStringField("message", error.message());
+        if (error.messageKey().isPresent()) {
+            generator.writeStringField("messageKey", error.messageKey().get());
+        }
+        if (!error.details().isEmpty()) {
+            generator.writeFieldName("details");
+            JsonValueWriter.write(generator, error.details());
+        }
+        if (error.inner().isPresent()) {
+            generator.writeFieldName("inner");
+            write(error.inner().get(), generator);
+        }
+        generator.writeEndObject();
     }
 
     /**

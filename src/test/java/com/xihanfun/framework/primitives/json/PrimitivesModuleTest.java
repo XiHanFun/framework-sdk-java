@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonRawValue;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.xihanfun.framework.primitives.Error;
@@ -16,6 +18,8 @@ import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Stability;
 import com.xihanfun.framework.primitives.TypedId;
 import com.xihanfun.framework.primitives.Unit;
+import java.io.ByteArrayOutputStream;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -83,6 +87,60 @@ class PrimitivesModuleTest {
         assertThrows(MismatchedInputException.class, () -> mapper.readValue("{\"ok\":true}", new TypeReference<Result<Integer>>() { }),
                 "a successful result needs a value");
         assertThrows(MismatchedInputException.class, () -> mapper.readValue("{\"value\":1}", new TypeReference<Result<Integer>>() { }));
+    }
+
+    /** 嵌套 {@code levels} 层的对象：1 层是 {@code {}}。 */
+    private static Map<String, Object> nested(int levels) {
+        Map<String, Object> value = Map.of();
+        for (int level = 1; level < levels; level++) {
+            value = Map.of("a", value);
+        }
+        return value;
+    }
+
+    /** 原样嵌进去的 JSON 文本：Jackson 写出时不核对它。 */
+    record Raw(@JsonRawValue String json) {
+    }
+
+    @Test
+    void resultsAndErrorsThatCannotBeWrittenFailWithoutWritingText() throws Exception {
+        // RFC-0001「写出与转交」（ADR-0320）：孤立的代理项、从结果的根算起超过 64 层、任何一层的重复成员都写不出，不写成 U+FFFD 或 \ud800
+        String high = String.valueOf((char) 0xD800);
+        String low = String.valueOf((char) 0xDC00);
+        List<Object> unwritable = List.of(
+                Error.literal("ORDERS_CONFLICT_001", "stale" + high),
+                Error.validation("ORDERS_VALIDATION_001", "orders.invalid", Map.of("id", low)),
+                Error.validation("ORDERS_VALIDATION_001", "orders.invalid", Map.of(high + "id", 1)),
+                Error.unexpected("ORDERS_UNEXPECTED_001", "orders.failed", Map.of(), Error.literal("KERNEL_UNEXPECTED_001", low + high)),
+                Error.literal("ORDERS_CONFLICT_001", "deep", nested(64)),
+                Result.ok("x" + low),
+                Result.ok(Map.of(high, 1)),
+                Result.ok(List.of(Map.of("note", "a" + high + "b"))),
+                Result.fail(Error.literal("ORDERS_CONFLICT_001", "stale" + low)),
+                Result.ok(nested(64)),
+                Result.fail(Error.literal("ORDERS_CONFLICT_001", "deep", nested(63))),
+                Result.ok(new Raw("{\"a\":1,\"a\":2}")),
+                Result.ok(new Raw("{\"a\":{\"b\":[{\"c\":1,\"c\":1}]}}")),
+                Result.ok(new Raw("[".repeat(63) + "]".repeat(63))));
+        for (Object value : unwritable) {
+            assertThrows(JsonMappingException.class, () -> mapper.writeValueAsBytes(value), value.toString());
+            assertThrows(JsonMappingException.class, () -> mapper.writeValueAsString(value), value.toString());
+            assertThrows(JsonMappingException.class, () -> mapper.writeValueAsString(List.of(value)), "nested: " + value);
+            ByteArrayOutputStream written = new ByteArrayOutputStream();
+            assertThrows(JsonMappingException.class, () -> mapper.writeValue(written, value), value.toString());
+            assertEquals(0, written.size(), "nothing is written: " + value);
+        }
+
+        // 上限本身照写：结果 1 层、成功值 63 层；错误 1 层、细节 63 层；失败的结果里细节 62 层；成功值的对象里原样嵌进 62 层；成对的代理项是一个字符
+        String pair = new String(Character.toChars(0x1F600));
+        assertEquals("{\"ok\":true,\"value\":" + "{\"a\":".repeat(62) + "{}" + "}".repeat(62) + "}", mapper.writeValueAsString(Result.ok(nested(63))));
+        mapper.writeValueAsBytes(Error.literal("ORDERS_CONFLICT_001", "deep", nested(63)));
+        mapper.writeValueAsBytes(Result.fail(Error.literal("ORDERS_CONFLICT_001", "deep", nested(62))));
+        mapper.writeValueAsBytes(Result.ok(new Raw("[".repeat(62) + "]".repeat(62))));
+        assertEquals("{\"ok\":true,\"value\":{\"note\":\"" + pair + "\"}}", mapper.writeValueAsString(Result.ok(Map.of("note", pair))));
+        assertEquals("{\"ok\":true,\"value\":{\"json\":{\"a\":1}}}", mapper.writeValueAsString(Result.ok(new Raw("{\"a\":1}"))));
+        assertEquals("{\"code\":\"ORDERS_CONFLICT_001\",\"message\":\"stale " + pair + "\"}",
+                mapper.writeValueAsString(Error.literal("ORDERS_CONFLICT_001", "stale " + pair)));
     }
 
     @Test

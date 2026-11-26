@@ -1,8 +1,10 @@
 package com.xihanfun.framework.plugin;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
+import com.xihanfun.framework.internal.JsonValueWriter;
 import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.plugin.v1.PluginProto;
@@ -16,6 +18,7 @@ import com.xihanfun.framework.primitives.Result;
 import com.xihanfun.framework.primitives.Unit;
 import com.xihanfun.framework.primitives.json.PrimitivesModule;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.math.BigInteger;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -32,7 +35,7 @@ import java.util.TreeMap;
  * 协议消息与 SDK 类型之间的转换（{@code invocation.md} §2、§3）：错误按 RFC-0001 的线上编码一一对应，上下文按 RFC-0003 平铺。
  */
 final class Wire {
-    /** 细节按值模型写出：经原语的线上编码，不另写一份数字规则。 */
+    /** 读细节的映射器；写细节用它的写出器工厂，数字规则与原语的线上编码共用 {@link JsonValueWriter}。 */
     private static final ObjectMapper JSON = new ObjectMapper().registerModule(new PrimitivesModule());
 
     /** 时间文本换算成 UTC 之后（不计小数）允许的最早时刻（RFC-0003 规则 8，截止时间与信封的 {@code time} 共用）。 */
@@ -78,6 +81,7 @@ final class Wire {
     /**
      * 写出错误（{@code invocation.md} §3）：{@code code}、{@code message_key} 原样；带消息键的错误 {@code text} 留空，由宿主按目录翻译成调用方的语言
      * （RFC-0010），只有自由文本错误写 {@code text}；{@code details} 是按值模型写出的 JSON 对象文本，没有时为空；{@code inner} 同样写出。
+     * 细节写不出（有孤立的代理项，或写出的文本没过共同检查）时这个错误不带细节，其余字段照写，内部错误的细节各自核对（ADR-0320）。
      */
     static PluginProto.Error error(Error error) {
         PluginProto.Error.Builder builder = PluginProto.Error.newBuilder().setCode(error.code());
@@ -87,7 +91,7 @@ final class Wire {
             builder.setText(error.text().orElse(error.code()));
         }
         if (!error.details().isEmpty()) {
-            builder.setDetails(details(error));
+            details(error.details()).ifPresent(builder::setDetails);
         }
         error.inner().ifPresent(inner -> builder.setInner(error(inner)));
         return builder.build();
@@ -202,14 +206,22 @@ final class Wire {
         return null;
     }
 
-    private static String details(Error error) {
-        try {
-            JsonNode encoded = JSON.readTree(JSON.writeValueAsBytes(error));
-            return JSON.writeValueAsString(encoded.get("details"));
-        } catch (IOException impossible) {
-            // 细节在创建错误时已校验为 JSON 值，编码不会失败
-            throw new IllegalStateException("The error details cannot be encoded.", impossible);
+    /**
+     * 写出细节（{@code invocation.md} §3「写出 Error」，RFC-0001「写出与转交」，ADR-0320）：按值模型写成 JSON 对象文本，写出的文本过共同检查；
+     * 字符串（成员名与值）有孤立的代理项或嵌套超过 64 层时写不出，为空。不写成 U+FFFD 或 {@code \ud800}：protobuf 写出字符串时会把孤立的代理项换成
+     * {@code ?}，对方读到的是另一份细节。
+     */
+    static Optional<String> details(Map<String, Object> details) {
+        StringWriter text = new StringWriter();
+        // 按字符写出：孤立的代理项原样留在文本里，由共同检查的严格编码拦下
+        try (JsonGenerator generator = JSON.getFactory().createGenerator(text)) {
+            JsonValueWriter.write(generator, details);
+        } catch (IOException tooDeep) {
+            // 嵌套深到 Jackson 写出的上限时同样写不出
+            return Optional.empty();
         }
+        String written = text.toString();
+        return JsonText.check(written).isPresent() ? Optional.empty() : Optional.of(written);
     }
 
     /** {@code PLUGINS_UNAVAILABLE_001} + {@value PluginMessages#UNAVAILABLE}：不在可服务状态（{@code lifecycle.md} §7.3）。 */

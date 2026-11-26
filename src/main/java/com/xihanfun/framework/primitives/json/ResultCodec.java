@@ -32,6 +32,10 @@ final class ResultCodec {
 
     /**
      * 写出 {@code ok} 与 {@code value} 或 {@code error}；无值成功不写 {@code value}。
+     *
+     * <p>写出是严格的（RFC-0001「写出与转交」，ADR-0320）：成功值或错误里的字符串有孤立的代理项，从结果的根算起嵌套超过 64 层
+     * （成功值的最外层是第 2 层），或任何一层有重复的成员名时写不出，抛出 {@link com.fasterxml.jackson.databind.JsonMappingException}，
+     * 什么也不写。
      */
     static final class Serializer extends StdSerializer<Result<?>> {
         @Serial
@@ -43,21 +47,24 @@ final class ResultCodec {
 
         @Override
         public void serialize(Result<?> result, JsonGenerator generator, SerializerProvider provider) throws IOException {
-            generator.writeStartObject();
-            if (result.isOk()) {
-                generator.writeBooleanField("ok", true);
-                Object value = result.value().orElseThrow();
-                // 无值成功只写 ok：以前写成 {"ok":true,"value":{}}，与 .NET 的 {"ok":true} 互相读不出（ADR-0233）
-                if (value != Unit.VALUE) {
-                    generator.writeFieldName("value");
-                    provider.defaultSerializeValue(value, generator);
+            StrictWrites.write(generator, provider, "result", buffer -> {
+                buffer.writeStartObject();
+                if (result.isOk()) {
+                    buffer.writeBooleanField("ok", true);
+                    Object value = result.value().orElseThrow();
+                    // 无值成功只写 ok：以前写成 {"ok":true,"value":{}}，与 .NET 的 {"ok":true} 互相读不出（ADR-0233）
+                    if (value != Unit.VALUE) {
+                        buffer.writeFieldName("value");
+                        provider.defaultSerializeValue(value, buffer);
+                    }
+                } else {
+                    buffer.writeBooleanField("ok", false);
+                    buffer.writeFieldName("error");
+                    // 错误在这里一并核对，深度从结果的根算起
+                    ErrorCodec.write(result.error().orElseThrow(), buffer);
                 }
-            } else {
-                generator.writeBooleanField("ok", false);
-                generator.writeFieldName("error");
-                provider.defaultSerializeValue(result.error().orElseThrow(), generator);
-            }
-            generator.writeEndObject();
+                buffer.writeEndObject();
+            });
         }
     }
 
