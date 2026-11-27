@@ -634,7 +634,7 @@ class HostCallbackTest {
         Outcome invalidData = new Outcome(false, "MESSAGING_VALIDATION_002", "messaging.envelope.invalid",
                 "{\"reason\":\"the data has a lone surrogate and cannot be encoded as UTF-8\"}", "");
         Outcome closed = new Outcome(false, PluginErrors.UNAVAILABLE, PluginMessages.HOST_UNAVAILABLE,
-                "{\"id\":\"xihan.tests.sample\",\"reason\":\"Unavailable: the plugin runtime has stopped\"}", "");
+                "{\"id\":\"xihan.tests.sample\",\"reason\":\"Unavailable: the host client is closed\"}", "");
         try (RunningPlugin plugin = start(hostAddress())) {
             assertTrue(relay(plugin, "orders.create").ok(), "the first callback dials the host");
             int calls = sessions.size();

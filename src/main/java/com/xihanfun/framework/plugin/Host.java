@@ -322,7 +322,8 @@ public final class Host {
         try {
             Optional<ManagedChannel> opened = channel();
             if (opened.isEmpty()) {
-                return Result.fail(mapStatus(wire, rpc, Status.Code.UNAVAILABLE.value(), "the plugin runtime has stopped", context.isCancelled(),
+                // 回调客户端已释放（invocation.md §5，ADR-0328）：规范不规定说明，与 TypeScript、Python、PHP 写同一句（ADR-0340）
+                return Result.fail(mapStatus(wire, rpc, Status.Code.UNAVAILABLE.value(), "the host client is closed", context.isCancelled(),
                         operation));
             }
             channel = opened.get();
