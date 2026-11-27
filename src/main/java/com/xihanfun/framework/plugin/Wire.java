@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
 import com.xihanfun.framework.internal.JsonValueWriter;
+import com.xihanfun.framework.internal.UnicodeText;
 import com.xihanfun.framework.internal.Whitespace;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.plugin.v1.PluginProto;
@@ -82,13 +83,16 @@ final class Wire {
      * 写出错误（{@code invocation.md} §3）：{@code code}、{@code message_key} 原样；带消息键的错误 {@code text} 留空，由宿主按目录翻译成调用方的语言
      * （RFC-0010），只有自由文本错误写 {@code text}；{@code details} 是按值模型写出的 JSON 对象文本，没有时为空；{@code inner} 同样写出。
      * 细节写不出（有孤立的代理项，或写出的文本没过共同检查）时这个错误不带细节，其余字段照写，内部错误的细节各自核对（ADR-0320）。
+     * {@code text} 里的孤立代理项各换成一个 U+FFFD、成对的照抄（{@code invocation.md} §3「写出 Error 的文案」，ADR-0339），内部错误的同此；
+     * protobuf-java 写出字符串时会把它换成 {@code ?}。
      */
     static PluginProto.Error error(Error error) {
         PluginProto.Error.Builder builder = PluginProto.Error.newBuilder().setCode(error.code());
         if (error.messageKey().isPresent()) {
             builder.setMessageKey(error.messageKey().get());
         } else {
-            builder.setText(error.text().orElse(error.code()));
+            // 文案是自由文本，不拿来查找或比较：编不成 UTF-8 的部分按最大子部分换成 U+FFFD，不让整个错误写不出，也不换成 ?
+            builder.setText(UnicodeText.replaceLoneSurrogates(error.text().orElse(error.code())));
         }
         if (!error.details().isEmpty()) {
             details(error.details()).ifPresent(builder::setDetails);

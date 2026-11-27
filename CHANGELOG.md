@@ -16,6 +16,7 @@
 
 ### 变更
 
+- **修复** 插件写给宿主的自由文本错误文案（含内部错误的）有孤立的代理项时各换成 U+FFFD 写出，不再换成 `?`（ADR-0339）
 - **修复** 插件写给宿主的错误细节有孤立的代理项或超过 64 层时不带细节，其余字段照写，不再把孤立的代理项换成 `?`（ADR-0320）
 - **新增** `PluginMessages.ENVELOPE_INVALID`，内置目录能按 10 个区域渲染本地报出的 `messaging.envelope.invalid`（ADR-0315）
 - **新增** `Envelope.dataSchema()`、`Builder.dataSchema(String)` 与 `Envelope.hasUnencodableData()`、`OperationRequest.hasUnencodableText()`（ADR-0305、ADR-0312、ADR-0315）
