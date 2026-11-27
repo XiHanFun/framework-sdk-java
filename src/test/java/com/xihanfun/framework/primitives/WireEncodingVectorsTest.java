@@ -24,9 +24,9 @@ class WireEncodingVectorsTest {
         JsonNode results = Vectors.read("primitives/wire-encoding.json").get("results");
         for (JsonNode vector : results.get("valid")) {
             JavaType type = resultType(vector.get("kind").textValue());
-            Object decoded = PrimitivesJson.read(mapper, mapper.writeValueAsBytes(vector.get("json")), type);
+            Result<?> decoded = PrimitivesJson.read(mapper, mapper.writeValueAsBytes(vector.get("json")), type);
             JsonNode expected = vector.has("canonical") ? vector.get("canonical") : vector.get("json");
-            assertEquals(expected, mapper.readTree(mapper.writeValueAsString(decoded)), vector.get("name").textValue());
+            assertEquals(expected, mapper.readTree(PrimitivesJson.write(mapper, decoded)), vector.get("name").textValue());
         }
         for (JsonNode vector : results.get("invalid")) {
             JavaType type = resultType(vector.get("kind").textValue());
@@ -41,7 +41,7 @@ class WireEncodingVectorsTest {
         for (JsonNode vector : errors.get("valid")) {
             Error decoded = PrimitivesJson.read(mapper, mapper.writeValueAsBytes(vector.get("json")), Error.class);
             JsonNode expected = vector.has("canonical") ? vector.get("canonical") : vector.get("json");
-            assertEquals(expected, mapper.readTree(mapper.writeValueAsString(decoded)), vector.get("name").textValue());
+            assertEquals(expected, mapper.readTree(PrimitivesJson.write(mapper, decoded)), vector.get("name").textValue());
         }
         for (JsonNode vector : errors.get("invalid")) {
             String json = mapper.writeValueAsString(vector.get("json"));

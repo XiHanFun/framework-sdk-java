@@ -6,7 +6,7 @@
 
 ### 升级须知
 
-- `PrimitivesModule` 写出 `Result` 与 `Error` 时，字符串有孤立的代理项、从根算起嵌套超过 64 层或有重复成员即抛 `JsonMappingException`、不写出文本：写出之前去掉这类值（ADR-0320）
+- `Result` 与 `Error` 的字符串有孤立的代理项、从根算起嵌套超过 64 层或有重复成员即写不出、不写出文本：经 `PrimitivesJson.write` 抛 `IllegalArgumentException`，直接用 `ObjectMapper` 时抛原因为它的 `JsonMappingException`；写出之前去掉这类值（ADR-0320、ADR-0340）
 - 已登记 Baggage 键的值有孤立的代理项时，`Context.Builder.baggage` 丢弃这个成员、`withBaggage` 抛 `IllegalArgumentException`：从外部输入拼值之前先去掉（ADR-0321）
 - `Envelope.time()` 改为 `Optional<Instant>`，`Builder.time(String)` 换成 `time(Instant)`：传 `Instant`，要文本时自己格式化（ADR-0306）
 - `ResolvedBinding` 新增记录组件 `properties`：按三个组件解构的记录模式补上第四个；Jackson 写出绑定只有 `name`、`type` 与 `propertyNames`，要值的自己取 `value()` 与 `properties()`（ADR-0285）
@@ -17,6 +17,7 @@
 ### 变更
 
 - **修复** 插件写给宿主的自由文本错误文案（含内部错误的）有孤立的代理项时各换成 U+FFFD 写出，不再换成 `?`（ADR-0339）
+- **新增** `PrimitivesJson.write(ObjectMapper, Result)` 与 `write(ObjectMapper, Error)`：严格写出线上编码，写不出抛 `IllegalArgumentException`，Jackson 的异常留作原因（ADR-0340）
 - **修复** 插件写给宿主的错误细节有孤立的代理项或超过 64 层时不带细节，其余字段照写，不再把孤立的代理项换成 `?`（ADR-0320）
 - **新增** `PluginMessages.ENVELOPE_INVALID`，内置目录能按 10 个区域渲染本地报出的 `messaging.envelope.invalid`（ADR-0315）
 - **新增** `Envelope.dataSchema()`、`Builder.dataSchema(String)` 与 `Envelope.hasUnencodableData()`、`OperationRequest.hasUnencodableText()`（ADR-0305、ADR-0312、ADR-0315）

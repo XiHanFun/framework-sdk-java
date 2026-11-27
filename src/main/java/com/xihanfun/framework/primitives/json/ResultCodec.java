@@ -34,8 +34,8 @@ final class ResultCodec {
      * 写出 {@code ok} 与 {@code value} 或 {@code error}；无值成功不写 {@code value}。
      *
      * <p>写出是严格的（RFC-0001「写出与转交」，ADR-0320）：成功值或错误里的字符串有孤立的代理项，从结果的根算起嵌套超过 64 层
-     * （成功值的最外层是第 2 层），或任何一层有重复的成员名时写不出，抛出 {@link com.fasterxml.jackson.databind.JsonMappingException}，
-     * 什么也不写。
+     * （成功值的最外层是第 2 层），或任何一层有重复的成员名时写不出，抛出 {@link IllegalArgumentException}（Jackson 把它包成
+     * {@code JsonMappingException}，ADR-0340），什么也不写。
      */
     static final class Serializer extends StdSerializer<Result<?>> {
         @Serial
@@ -47,7 +47,7 @@ final class ResultCodec {
 
         @Override
         public void serialize(Result<?> result, JsonGenerator generator, SerializerProvider provider) throws IOException {
-            StrictWrites.write(generator, provider, "result", buffer -> {
+            StrictWrites.write(generator, "result", buffer -> {
                 buffer.writeStartObject();
                 if (result.isOk()) {
                     buffer.writeBooleanField("ok", true);

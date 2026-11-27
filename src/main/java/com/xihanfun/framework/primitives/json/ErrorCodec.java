@@ -27,7 +27,7 @@ final class ErrorCodec {
      * 不写 {@code null}；成员顺序固定。
      *
      * <p>写出是严格的（RFC-0001「写出与转交」，ADR-0320）：文案、细节或内部错误里有孤立的代理项，或从错误的根算起嵌套超过 64 层时写不出，
-     * 抛出 {@link com.fasterxml.jackson.databind.JsonMappingException}，什么也不写。
+     * 抛出 {@link IllegalArgumentException}（Jackson 把它包成 {@code JsonMappingException}，ADR-0340），什么也不写。
      */
     static final class Serializer extends StdSerializer<Error> {
         @Serial
@@ -39,7 +39,7 @@ final class ErrorCodec {
 
         @Override
         public void serialize(Error error, JsonGenerator generator, SerializerProvider provider) throws IOException {
-            StrictWrites.write(generator, provider, "error", buffer -> write(error, buffer));
+            StrictWrites.write(generator, "error", buffer -> write(error, buffer));
         }
     }
 

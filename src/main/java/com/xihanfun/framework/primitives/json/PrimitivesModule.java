@@ -29,8 +29,10 @@ import java.io.Serial;
  * 不合规则的以 Jackson 的 {@code MismatchedInputException} 拒绝，不静默补默认值；Result 与 Error 的未知成员忽略。
  *
  * <p>Result 与 Error 的写出按 RFC-0001「写出与转交」（ADR-0320）：写出的字符串（文案、细节与成功值里的成员名与字符串值，含内部错误的）
- * 有孤立的代理项，从结果或错误的根算起嵌套超过 64 层（成功值的最外层是第 2 层），或任何一层有重复的成员名时写不出，
- * 以 {@code JsonMappingException} 失败、不写出文本，对方读不进的文本不交出去；不写成 U+FFFD 或 {@code \ud800} 这样的转义。
+ * 有孤立的代理项，从结果或错误的根算起嵌套超过 64 层（成功值的最外层是第 2 层），或任何一层有重复的成员名时写不出、不写出文本，
+ * 对方读不进的文本不交出去；不写成 U+FFFD 或 {@code \ud800} 这样的转义。写出入口是 {@link PrimitivesJson} 的两个 {@code write}，
+ * 写不出抛 {@link IllegalArgumentException}（ADR-0340）；直接用 {@code ObjectMapper} 写出时 Jackson 把它包成 {@code JsonMappingException}，
+ * 原因是那个 {@link IllegalArgumentException}。
  *
  * <p>本类型继承 Jackson 的模块类型，模块描述以 {@code requires transitive com.fasterxml.jackson.databind} 把 Jackson 交给使用者。
  */

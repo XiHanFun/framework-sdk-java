@@ -4,17 +4,24 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.xihanfun.framework.primitives.Error;
 import com.xihanfun.framework.primitives.JsonText;
+import com.xihanfun.framework.primitives.Result;
 import java.io.IOException;
 import java.io.Serial;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 从 JSON 文本读出原语的入口：先过 RFC-0001「JSON 文本」的共同检查（{@link JsonText#check(byte[])}，ADR-0236），再交给 Jackson。
+ * 原语线上编码的读写入口。读：先过 RFC-0001「JSON 文本」的共同检查（{@link JsonText#check(byte[])}，ADR-0236），再交给 Jackson；
+ * 写：{@link Result} 与 {@link Error} 严格写出，写不出抛 {@link IllegalArgumentException}（RFC-0001「写出与转交」，ADR-0320、ADR-0340）。
  *
  * <p>{@link PrimitivesModule} 的解码器在词法单元上核对重复成员、嵌套层数与孤立的代理项，但 BOM、非法 UTF-8、注释与尾逗号这类文本层面的问题，
  * Jackson 的解析器或者放过、或者随使用者的配置而定，解码器看不见；从线上收到的文本应经这里读。
+ *
+ * <p>写出的核对由 {@link PrimitivesModule} 的编码器做，直接用 {@code ObjectMapper} 写出同样严格，只是 Jackson 把编码器抛出的
+ * {@link IllegalArgumentException} 包成 {@code JsonMappingException}；经这里写出时解开再抛，与 .NET 的 {@code ResultJson.Write} 抛
+ * {@code ArgumentException} 对齐。
  */
 public final class PrimitivesJson {
     private PrimitivesJson() {
@@ -125,6 +132,50 @@ public final class PrimitivesJson {
      */
     public static <T> T read(ObjectMapper mapper, String text, Class<T> type) throws IOException {
         return read(mapper, text, Objects.requireNonNull(mapper, "mapper").constructType(type));
+    }
+
+    /**
+     * 严格写出结果：有值成功 {@code {"ok":true,"value":…}}，无值成功 {@code {"ok":true}}，失败 {@code {"ok":false,"error":{…}}}。
+     *
+     * <p>写不出（RFC-0001「写出与转交」，ADR-0320）：字符串（文案、细节与成功值里的成员名与字符串值，含内部错误的）有孤立的代理项，
+     * 从结果的根算起嵌套超过 64 层（成功值的最外层是第 2 层），或任何一层有重复的成员名（自定义序列化器、{@code @JsonRawValue}
+     * 原样嵌进去的文本）；成功值的序列化器自己失败、超过 Jackson 写出的约束同样算写不出。这时什么也不交出，抛 {@link IllegalArgumentException}，
+     * Jackson 的异常留作原因（ADR-0340）。
+     *
+     * @param mapper 登记了 {@link PrimitivesModule} 的映射器
+     * @param result 结果
+     * @return 线上编码的 JSON 文本
+     * @throws IllegalArgumentException 结果写不成合法的 JSON 文本
+     */
+    public static String write(ObjectMapper mapper, Result<?> result) {
+        Objects.requireNonNull(mapper, "mapper");
+        Objects.requireNonNull(result, "result");
+        try {
+            return mapper.writeValueAsString(result);
+        } catch (JsonProcessingException failure) {
+            throw StrictWrites.unwritable("result", failure);
+        }
+    }
+
+    /**
+     * 严格写出一个错误：{@code code}、{@code message}、{@code messageKey}、{@code details}、{@code inner}，没有的成员不写。
+     *
+     * <p>文案、细节或内部错误里有孤立的代理项，或从错误的根算起嵌套超过 64 层时写不出，什么也不交出，抛 {@link IllegalArgumentException}，
+     * Jackson 的异常留作原因（RFC-0001「写出与转交」，ADR-0320、ADR-0340）。
+     *
+     * @param mapper 登记了 {@link PrimitivesModule} 的映射器
+     * @param error 错误
+     * @return 线上编码的 JSON 文本
+     * @throws IllegalArgumentException 错误写不成合法的 JSON 文本
+     */
+    public static String write(ObjectMapper mapper, Error error) {
+        Objects.requireNonNull(mapper, "mapper");
+        Objects.requireNonNull(error, "error");
+        try {
+            return mapper.writeValueAsString(error);
+        } catch (JsonProcessingException failure) {
+            throw StrictWrites.unwritable("error", failure);
+        }
     }
 
     private static void check(byte[] utf8) throws InvalidJsonTextException {

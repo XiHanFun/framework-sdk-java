@@ -2,6 +2,7 @@ package com.xihanfun.framework.primitives.json;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 /**
  * 线上编码（RFC-0001「Result」）：写出的 JSON 逐字核对，读取时拒绝不合编码的写法。
@@ -123,24 +125,51 @@ class PrimitivesModuleTest {
                 Result.ok(new Raw("{\"a\":{\"b\":[{\"c\":1,\"c\":1}]}}")),
                 Result.ok(new Raw("[".repeat(63) + "]".repeat(63))));
         for (Object value : unwritable) {
-            assertThrows(JsonMappingException.class, () -> mapper.writeValueAsBytes(value), value.toString());
-            assertThrows(JsonMappingException.class, () -> mapper.writeValueAsString(value), value.toString());
-            assertThrows(JsonMappingException.class, () -> mapper.writeValueAsString(List.of(value)), "nested: " + value);
+            // 写出入口抛 IllegalArgumentException（ADR-0340）：消息取编码器的，Jackson 的异常留作原因，它的原因是编码器抛出的那个
+            IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class, () -> write(value), value.toString());
+            String what = value instanceof Result<?> ? "result" : "error";
+            assertTrue(thrown.getMessage().startsWith("The " + what + " cannot be written to the wire: "), thrown.getMessage());
+            JsonMappingException wrapped = assertInstanceOf(JsonMappingException.class, thrown.getCause(), value.toString());
+            assertInstanceOf(IllegalArgumentException.class, wrapped.getCause(), value.toString());
+            // 直接用 ObjectMapper 写出时 Jackson 把编码器抛出的 IllegalArgumentException 包成 JsonMappingException
+            List<Executable> direct = List.of(() -> mapper.writeValueAsBytes(value), () -> mapper.writeValueAsString(value),
+                    () -> mapper.writeValueAsString(List.of(value)));
+            for (Executable writing : direct) {
+                JsonMappingException failure = assertThrows(JsonMappingException.class, writing, value.toString());
+                assertInstanceOf(IllegalArgumentException.class, failure.getCause(), value.toString());
+            }
             ByteArrayOutputStream written = new ByteArrayOutputStream();
             assertThrows(JsonMappingException.class, () -> mapper.writeValue(written, value), value.toString());
             assertEquals(0, written.size(), "nothing is written: " + value);
         }
+        // 成功值的序列化器自己失败同样是 IllegalArgumentException，消息是固定的一句，Jackson 的异常留作原因
+        IllegalArgumentException unserializable = assertThrows(IllegalArgumentException.class,
+                () -> PrimitivesJson.write(mapper, Result.ok(new Object())));
+        assertEquals("The result cannot be written to the wire.", unserializable.getMessage());
+        assertInstanceOf(JsonMappingException.class, unserializable.getCause());
 
         // 上限本身照写：结果 1 层、成功值 63 层；错误 1 层、细节 63 层；失败的结果里细节 62 层；成功值的对象里原样嵌进 62 层；成对的代理项是一个字符
         String pair = new String(Character.toChars(0x1F600));
-        assertEquals("{\"ok\":true,\"value\":" + "{\"a\":".repeat(62) + "{}" + "}".repeat(62) + "}", mapper.writeValueAsString(Result.ok(nested(63))));
-        mapper.writeValueAsBytes(Error.literal("ORDERS_CONFLICT_001", "deep", nested(63)));
-        mapper.writeValueAsBytes(Result.fail(Error.literal("ORDERS_CONFLICT_001", "deep", nested(62))));
-        mapper.writeValueAsBytes(Result.ok(new Raw("[".repeat(62) + "]".repeat(62))));
-        assertEquals("{\"ok\":true,\"value\":{\"note\":\"" + pair + "\"}}", mapper.writeValueAsString(Result.ok(Map.of("note", pair))));
-        assertEquals("{\"ok\":true,\"value\":{\"json\":{\"a\":1}}}", mapper.writeValueAsString(Result.ok(new Raw("{\"a\":1}"))));
+        assertEquals("{\"ok\":true,\"value\":" + "{\"a\":".repeat(62) + "{}" + "}".repeat(62) + "}",
+                PrimitivesJson.write(mapper, Result.ok(nested(63))));
+        List<Object> writable = List.of(
+                Result.ok(nested(63)),
+                Error.literal("ORDERS_CONFLICT_001", "deep", nested(63)),
+                Result.fail(Error.literal("ORDERS_CONFLICT_001", "deep", nested(62))),
+                Result.ok(new Raw("[".repeat(62) + "]".repeat(62))));
+        for (Object value : writable) {
+            assertEquals(mapper.writeValueAsString(value), write(value), "the entry writes what the mapper writes: " + value);
+        }
+        assertEquals("{\"ok\":true,\"value\":{\"note\":\"" + pair + "\"}}", PrimitivesJson.write(mapper, Result.ok(Map.of("note", pair))));
+        assertEquals("{\"ok\":true,\"value\":{\"json\":{\"a\":1}}}", PrimitivesJson.write(mapper, Result.ok(new Raw("{\"a\":1}"))));
         assertEquals("{\"code\":\"ORDERS_CONFLICT_001\",\"message\":\"stale " + pair + "\"}",
-                mapper.writeValueAsString(Error.literal("ORDERS_CONFLICT_001", "stale " + pair)));
+                PrimitivesJson.write(mapper, Error.literal("ORDERS_CONFLICT_001", "stale " + pair)));
+        assertEquals("{\"ok\":true}", PrimitivesJson.write(mapper, Result.success()));
+    }
+
+    /** 经写出入口写出结果或错误。 */
+    private String write(Object value) {
+        return value instanceof Result<?> result ? PrimitivesJson.write(mapper, result) : PrimitivesJson.write(mapper, (Error) value);
     }
 
     @Test
