@@ -1020,40 +1020,62 @@ class HostCallbackTest {
     void replaysTheErrorTextWritingVector() throws Exception {
         // error-text-writing.json 的 utf16 一组（invocation.md §3「写出 Error 的文案」，ADR-0339、ADR-0346）：Java 的字符串以 UTF-16 码元存放，
         // 每个孤立的代理项换一个 U+FFFD，成对的与本来就是 U+FFFD 的照抄，不像 protobuf-java 的缺省那样换成 ?；
-        // 经 Wire.error 写出后编码成字节再解回来，核对的是线上的样子，而不是构建器里的字符串
+        // 每例同时作为顶层错误与内部错误的文案，经 Wire.error 写出后编码成字节再解回来，两处都与 expected 比：核对的是线上的样子，
+        // 而不是构建器里的字符串
         JsonNode vectors = Vectors.read("plugin/error-text-writing.json");
         assertFalse(vectors.get("utf16").isEmpty());
         for (JsonNode vector : vectors.get("utf16")) {
             String text = Vectors.utf16(vector.get("utf16"));
-            PluginProto.Error written = PluginProto.Error.parseFrom(Wire.error(Error.literal("SAMPLES_CONFLICT_001", text)).toByteArray());
-            assertEquals(vector.get("expected").textValue(), written.getText(), vector.get("name").asText());
+            Error error = Error.literal("SAMPLES_CONFLICT_001", text, Map.of(), Error.literal("SAMPLES_VALIDATION_002", text));
+            PluginProto.Error written = PluginProto.Error.parseFrom(Wire.error(error).toByteArray());
+            String expected = vector.get("expected").textValue();
+            String name = vector.get("name").asText();
+            assertEquals(expected, written.getText(), name);
+            assertEquals(expected, written.getInner().getText(), name + " / inner");
         }
     }
 
     @Test
-    void replacingTheTextKeepsTheOtherFieldsAndCoversInnerErrors() throws Exception {
-        // 向量只比文案本身（replaysTheErrorTextWritingVector）；这里核对整条错误照常写出（ADR-0339）：code、message_key、details 与 inner 照写，
-        // 内部错误的文案同样替换；带消息键的错误不写 text，它内部的自由文本错误照样替换，应答的 Status 同样写得出
-        String text = "stale" + (char) 0xD800;
-        String expected = "stale" + (char) 0xFFFD;
-        Error inner = Error.literal("SAMPLES_VALIDATION_002", "inner " + text, Map.of("id", "i1"));
-        Error error = Error.literal("SAMPLES_CONFLICT_001", text, Map.of("id", "o1"), inner);
-        PluginProto.Error written = PluginProto.Error.parseFrom(Wire.error(error).toByteArray());
-        assertEquals(expected, written.getText());
-        assertEquals("SAMPLES_CONFLICT_001", written.getCode());
-        assertEquals("", written.getMessageKey());
-        assertEquals("{\"id\":\"o1\"}", written.getDetails(), "the details are written as before");
-        assertEquals("inner " + expected, written.getInner().getText(), "the inner text is replaced the same way");
-        assertEquals("SAMPLES_VALIDATION_002", written.getInner().getCode());
-        assertEquals("{\"id\":\"i1\"}", written.getInner().getDetails());
-
+    void loneSurrogatesInTheTextAreWrittenAsReplacementCharacters() throws Exception {
+        // invocation.md §3「写出 Error 的文案」（ADR-0339）：text 里每个孤立的代理项换一个 U+FFFD，成对的与本来就是 U+FFFD 的照抄，长度不变；
+        // 整条错误照常写出，code、message_key、details 与 inner 照写，不像 protobuf-java 的缺省那样换成 ?
+        // 输入与 error-text-writing.json 的 utf16 一组逐码元相同的用例已删（replaysTheErrorTextWritingVector，ADR-0346），这里留下向量没覆盖的输入
+        String high = String.valueOf((char) 0xD800);
+        String low = String.valueOf((char) 0xDC00);
+        String pair = new String(Character.toChars(0x1F600));
+        String replacement = String.valueOf((char) 0xFFFD);
+        String[][] cases = {
+            {"stale" + high, "stale" + replacement},
+            {low + "stale", replacement + "stale"},
+            {"a" + low + high + "b", "a" + replacement + replacement + "b"},
+            {"smile " + pair, "smile " + pair},
+            {"already " + replacement, "already " + replacement},
+        };
         Wire wire = new Wire("xihan.tests.sample");
-        Error keyed = Error.unexpected("SAMPLES_UNEXPECTED_001", "samples.failed", Map.of("id", "o1"), inner);
-        PluginProto.Status status = PluginProto.Status.parseFrom(wire.status(Result.fail(keyed)).toByteArray());
-        assertFalse(status.getOk());
-        assertEquals("", status.getError().getText());
-        assertEquals("samples.failed", status.getError().getMessageKey());
-        assertEquals("{\"id\":\"o1\"}", status.getError().getDetails());
-        assertEquals("inner " + expected, status.getError().getInner().getText());
+        for (String[] item : cases) {
+            String text = item[0];
+            String expected = item[1];
+            Error inner = Error.literal("SAMPLES_VALIDATION_002", "inner " + text, Map.of("id", "i1"));
+            Error error = Error.literal("SAMPLES_CONFLICT_001", text, Map.of("id", "o1"), inner);
+            // 编码成字节再解回来：核对的是线上的样子，而不是构建器里的字符串
+            PluginProto.Error written = PluginProto.Error.parseFrom(Wire.error(error).toByteArray());
+            assertEquals(expected, written.getText(), text);
+            assertEquals(text.length(), written.getText().length(), "the replacement keeps the length");
+            assertEquals("SAMPLES_CONFLICT_001", written.getCode());
+            assertEquals("", written.getMessageKey());
+            assertEquals("{\"id\":\"o1\"}", written.getDetails(), "the details are written as before");
+            assertEquals("inner " + expected, written.getInner().getText(), "the inner text is replaced the same way");
+            assertEquals("SAMPLES_VALIDATION_002", written.getInner().getCode());
+            assertEquals("{\"id\":\"i1\"}", written.getInner().getDetails());
+
+            // 带消息键的错误不写 text，内部的自由文本错误照样替换；应答的 Status 同样写得出
+            Error keyed = Error.unexpected("SAMPLES_UNEXPECTED_001", "samples.failed", Map.of("id", "o1"), inner);
+            PluginProto.Status status = PluginProto.Status.parseFrom(wire.status(Result.fail(keyed)).toByteArray());
+            assertFalse(status.getOk());
+            assertEquals("", status.getError().getText());
+            assertEquals("samples.failed", status.getError().getMessageKey());
+            assertEquals("{\"id\":\"o1\"}", status.getError().getDetails());
+            assertEquals("inner " + expected, status.getError().getInner().getText());
+        }
     }
 }
