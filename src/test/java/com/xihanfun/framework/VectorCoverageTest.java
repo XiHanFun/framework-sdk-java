@@ -46,6 +46,8 @@ class VectorCoverageTest {
             "plugin/envelope-times.json",
             // HostCallbackTest
             "plugin/error-reading.json",
+            // HostCallbackTest（utf16 一组，经 Wire.error）
+            "plugin/error-text-writing.json",
             // PluginTypesTest
             "plugin/handshake-lines.json",
             // PluginTypesTest
