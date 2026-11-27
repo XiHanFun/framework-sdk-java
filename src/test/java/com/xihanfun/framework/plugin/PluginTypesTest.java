@@ -71,7 +71,8 @@ class PluginTypesTest {
         Set<String> reasons = new TreeSet<>();
         vectors.get("reasons").forEach(reason -> reasons.add(reason.get("reason").asText()));
         assertTrue(reasons.containsAll(List.of("the configuration is not a JSON object", "the host reported a failure without an error",
-                Host.NO_ENDPOINT, "invalid error code '{code}'", "the host returned {results} results for {envelopes} envelopes")), reasons.toString());
+                Host.NO_ENDPOINT, "invalid error code '{code}'", "the host returned {results} results for {envelopes} envelopes",
+                Host.UNENCODABLE_BAGGAGE)), reasons.toString());
     }
 
     @Test

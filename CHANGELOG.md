@@ -14,6 +14,7 @@
 - `OperationRequest.of(String, String)` 与 `Envelope.Builder.data(String)` 严格编码成 UTF-8，孤立的代理项不再换成 `?`，`Host.invoke` 与 `Host.publish` 在本地失败、不发出：要发出的文本里不要有孤立的代理项（ADR-0312、ADR-0315）
 - `Envelope.toString()` 有 `dataschema` 时多一段 `, dataSchema=…`，`ResolvedBinding.toString()` 多一段属性名：按旧文本断言的地方更新
 - 回调客户端关闭之后的回调，`plugins.host.unavailable` 的 `reason` 由 `Unavailable: the plugin runtime has stopped` 改为与其他 SDK 相同的 `Unavailable: the host client is closed`：按旧文本判断的地方更新（ADR-0340）
+- 上下文的幂等键有孤立的代理项时，`Host.invoke` 与 `Host.publish` 不再换成 `?` 照发，而是在本地以 `plugins.process.failed` 失败、不发出：设幂等键之前去掉孤立的代理项（ADR-0347）
 
 ### 变更
 

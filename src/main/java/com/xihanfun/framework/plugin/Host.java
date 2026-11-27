@@ -1,6 +1,7 @@
 package com.xihanfun.framework.plugin;
 
 import com.google.protobuf.ByteString;
+import com.xihanfun.framework.internal.UnicodeText;
 import com.xihanfun.framework.invocation.Context;
 import com.xihanfun.framework.invocation.ContextKey;
 import com.xihanfun.framework.invocation.InvocationErrors;
@@ -40,8 +41,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * 没有能连的端点时每次回调都以 {@code PLUGINS_UNAVAILABLE_001} + {@value PluginMessages#HOST_UNAVAILABLE} 失败、不发请求（{@code handshake.md} §4）。
  * 发出之前在本地按宿主的顺序核对，与宿主给出同样的错误：所需权限既在清单 {@code permissions} 里、也在 {@code Configure} 授予的权限里；
  * 上下文的租户是宿主此刻交给插件、还在处理的某个调用或投递的租户（ADR-0195）；然后，上下文的截止时间已过或已被取消时也不发请求；
- * {@code Host.Invoke} 最后还核对以 JSON 文本给出的载荷编得成 UTF-8（ADR-0312），{@code Host.Publish} 最后逐项核对以文本给出的 {@code data}
- * 编得成 UTF-8（ADR-0315）。每次回调都带会话令牌，元数据取自所在的调用上下文
+ * 之后核对要写进 {@code metadata.baggage} 的值没有孤立的代理项（ADR-0347）；{@code Host.Invoke} 最后还核对以 JSON 文本给出的载荷编得成 UTF-8
+ * （ADR-0312），{@code Host.Publish} 最后逐项核对以文本给出的 {@code data} 编得成 UTF-8（ADR-0315）。每次回调都带会话令牌，元数据取自所在的调用上下文
  * （追踪、截止时间、已登记的 Baggage），gRPC 调用的截止时间与之相同，取消上下文即取消回调。线程安全；连接在第一次回调时建立。
  */
 public final class Host {
@@ -84,6 +85,12 @@ public final class Host {
 
     /** 以文本设置的 {@code data} 编不成 UTF-8 时 {@code reason} 的固定文本（{@code invocation.md} §5，ADR-0315）。 */
     static final String UNENCODABLE_DATA = "the data has a lone surrogate and cannot be encoded as UTF-8";
+
+    /**
+     * 写进回调元数据的 Baggage 值有孤立的代理项时 {@code reason} 的模板（{@code plugin-messages.json}，{@code invocation.md} §5，ADR-0347）：
+     * {@code {key}} 换成键名，不带值。
+     */
+    static final String UNENCODABLE_BAGGAGE = "baggage '{key}' has a lone surrogate and cannot be encoded as UTF-8";
 
     /** gRPC 状态码 0–16 的 PascalCase 名字（{@code invocation.md} §3），下标即状态码；grpc-java 的枚举名是大写下划线，不能直接用。 */
     private static final List<String> STATUS_NAMES = List.of("OK", "Cancelled", "Unknown", "InvalidArgument", "DeadlineExceeded", "NotFound",
@@ -154,8 +161,12 @@ public final class Host {
      *
      * <p>以 JSON 文本创建的请求（{@link OperationRequest#of(String, String)}）文本编不成 UTF-8 时（孤立的代理项，
      * {@link OperationRequest#hasUnencodableText()}）不发请求，结果为 {@code KERNEL_VALIDATION_001} + {@code kernel.operation.invalid_payload}
-     * （{@code id} 为操作 ID，{@code reason} 为 {@code $}），与宿主读到不是 JSON 的载荷相同；这一项排在端点、权限、租户、截止时间与取消的核对之后
+     * （{@code id} 为操作 ID，{@code reason} 为 {@code $}），与宿主读到不是 JSON 的载荷相同；这一项排在端点、权限、租户、截止时间与取消以及元数据的核对之后
      * （{@code invocation.md} §5，ADR-0312）。以字节给出的载荷原样发出，由宿主核对。
+     *
+     * <p>上下文里要写进 {@code metadata.baggage} 的值（已登记的键；实际上只有幂等键可能带这样的值）有孤立的代理项时同样不发请求，结果为
+     * {@code PLUGINS_UNEXPECTED_001} + {@value PluginMessages#FAILED}（{@code phase} 为操作 ID，{@code reason} 为
+     * {@code baggage '<键>' has a lone surrogate and cannot be encoded as UTF-8}），排在截止时间与取消之后、载荷之前（{@code invocation.md} §5，ADR-0347）。
      *
      * @param context 调用上下文
      * @param request XGI 请求
@@ -167,6 +178,10 @@ public final class Host {
         Optional<Error> refused = refuse(context, RPC_INVOKE, request.id(), PERMISSION_INVOKE);
         if (refused.isPresent()) {
             return OperationResponse.failed(refused.get());
+        }
+        Optional<Error> unencodable = unencodableBaggage(context, request.id());
+        if (unencodable.isPresent()) {
+            return OperationResponse.failed(unencodable.get());
         }
         // 宿主在管道的 Validate 阶段才解码载荷：权限、租户与截止时间的错误先于它，所以排在 refuse 之后
         if (request.hasUnencodableText()) {
@@ -194,7 +209,9 @@ public final class Host {
     /**
      * 经宿主的消息代理发布一批消息，逐项结果与入参顺序一一对应（批量优先，{@code conventions/batch-first.md}）。
      *
-     * <p>空集合不发给宿主。端点、权限、上下文租户与截止时间的本地核对是整批的结果：不通过时每一项都是那个错误，一项也不发。之后逐项核对以文本
+     * <p>空集合不发给宿主。端点、权限、上下文租户与截止时间的本地核对是整批的结果：不通过时每一项都是那个错误，一项也不发；元数据同样是整批的：
+     * 要写进 {@code metadata.baggage} 的值有孤立的代理项时每一项都是 {@code PLUGINS_UNEXPECTED_001} + {@value PluginMessages#FAILED}
+     * （{@code phase} 为 {@code publish}，ADR-0347，见 {@link #invoke(Context, OperationRequest)}），一项也不发。之后逐项核对以文本
      * 设置的 {@code data}（{@link Envelope#hasUnencodableData()}，ADR-0315）：编不成 UTF-8 的那一项不发出，结果是 {@code MESSAGING_VALIDATION_002}
      * + {@code messaging.envelope.invalid}（{@code reason} 为 {@code the data has a lone surrogate and cannot be encoded as UTF-8}），
      * 其余各项照常组成一次请求，结果放回各自原来的位置；每一项都编不成时不发请求（{@code invocation.md} §5）。信封的 {@code xihantenant} 不在本地核对，由宿主逐项判定（宿主在它之前还核对发布器
@@ -214,6 +231,11 @@ public final class Host {
         Optional<Error> refused = refuse(context, RPC_PUBLISH, RPC_PUBLISH, PERMISSION_PUBLISH);
         if (refused.isPresent()) {
             return every(items.size(), Result.fail(refused.get()));
+        }
+        // 元数据是整个请求共用的：写不出时每一项都是这个错误，先于逐项的 data
+        Optional<Error> unencodable = unencodableBaggage(context, RPC_PUBLISH);
+        if (unencodable.isPresent()) {
+            return every(items.size(), Result.fail(unencodable.get()));
         }
         // 宿主转换信封是它逐项核对的最后一步，所以排在整批的核对之后：编不成的那一项先占好自己的位置，其余的按原来的先后发出
         List<Result<Unit>> results = new ArrayList<>(Collections.nCopies(items.size(), null));
@@ -300,6 +322,22 @@ public final class Host {
         }
         if (context.isCancelled()) {
             return Optional.of(mapStatus(wire, rpc, Status.Code.CANCELLED.value(), "", true, operation));
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 回调元数据的核对（{@code invocation.md} §5，ADR-0347）：要写进 {@code metadata.baggage} 的值（{@link Wire#metadata(Context)} 写出的已登记的键）
+     * 有孤立的代理项即不发请求，与宿主写给插件的元数据同一条规则、同一个错误；protobuf-java 写出字符串时会把它换成 {@code ?}，宿主收到的就是另一个值。
+     * 只看孤立的代理项，不用完整的 Baggage 值判定：幂等键不受长度与控制字符的约束，完整判定会误拒。几个键都是这样时点名先遇到的一个。
+     *
+     * @param phase {@code Host.Invoke} 为操作 ID，{@code Host.Publish} 为 {@value #RPC_PUBLISH}
+     */
+    private Optional<Error> unencodableBaggage(Context context, String phase) {
+        for (Map.Entry<String, String> entry : context.withoutUnregisteredBaggage().baggage().entrySet()) {
+            if (UnicodeText.hasLoneSurrogate(entry.getValue())) {
+                return Optional.of(wire.failed(phase, UNENCODABLE_BAGGAGE.replace("{key}", entry.getKey())));
+            }
         }
         return Optional.empty();
     }

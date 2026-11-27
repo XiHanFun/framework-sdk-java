@@ -54,7 +54,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * 宿主回调（{@code invocation.md} §5）：本测试扮演宿主的回调服务，核对端点的选择、本地核对（权限与租户）、元数据、批量发布、
+ * 宿主回调（{@code invocation.md} §5）：本测试扮演宿主的回调服务，核对端点的选择、本地核对（权限、租户与元数据）、元数据、批量发布、
  * gRPC 状态的映射（回放 {@code callback-status.json}）、宿主写来的错误的读入（§3，回放 {@code error-reading.json}）与写出的错误文案
  * （§3，回放 {@code error-text-writing.json}）。
  */
@@ -122,6 +122,29 @@ class HostCallbackTest {
             case "trailing" -> "{\"title\":\"x" + (char) 0xDBFF;
             case "pair" -> "{\"title\":\"" + new String(Character.toChars(0x1F600)) + "\"}";
             default -> "{\"title\":\"plain\"}";
+        };
+    }
+
+    /**
+     * 请求：在幂等键为 {@link #idempotencyKey} 的上下文里回调宿主：{@code rpc} 为 {@code invoke} 时以 JSON 文本经宿主调用 {@code orders.create}，
+     * 为 {@code publish} 时发布以文本设置 {@code data} 的两项；{@code payload} 为 {@code high} 时载荷（发布时为第一项的 {@code data}）有孤立的代理项；
+     * {@code state} 为 {@code expired} 或 {@code cancelled} 时上下文先到截止时间或先被取消，{@code tenant} 不为空时先往上下文里加这个租户。
+     */
+    record Carried(String rpc, String key, String payload, String state, String tenant) {
+    }
+
+    /**
+     * {@link Carried} 的幂等键：{@code high}、{@code low}、{@code reversed}（颠倒的一对）与 {@code trailing}（末尾的高代理项）有孤立的代理项，
+     * {@code pair} 带成对的代理项，其余是普通文本。幂等键不按值的约束丢弃（{@code conventions/baggage-keys.md}），所以上下文里能带着这样的值。
+     */
+    static String idempotencyKey(String key) {
+        return switch (key) {
+            case "high" -> "k" + (char) 0xD800 + "1";
+            case "low" -> String.valueOf((char) 0xDC00) + "k1";
+            case "reversed" -> "k" + (char) 0xDC00 + (char) 0xD800;
+            case "trailing" -> "k1" + (char) 0xDBFF;
+            case "pair" -> "k" + new String(Character.toChars(0x1F600));
+            default -> "k1";
         };
     }
 
@@ -326,6 +349,29 @@ class HostCallbackTest {
                 List<Outcome> results = new ArrayList<>();
                 Host host = Host.of(scope.context()).orElseThrow();
                 host.publish(scope.context(), envelopes).forEach(result -> results.add(Outcome.of(result, "")));
+                return Result.ok(new Published(results));
+            }
+        });
+        registry.add(OperationContract.of("samples.carry"), Carried.class, Published.class, (context, request) -> {
+            Context tenanted = request.tenant() == null ? context : context.withBaggage(BaggageKeys.TENANT, request.tenant());
+            Context call = tenanted.withBaggage(BaggageKeys.IDEMPOTENCY_KEY, idempotencyKey(request.key()));
+            CancellableContext scope = "expired".equals(request.state()) ? call.withTimeout(Duration.ZERO) : call.withCancellation();
+            try (scope) {
+                if ("cancelled".equals(request.state())) {
+                    scope.cancel();
+                }
+                Host host = Host.of(scope.context()).orElseThrow();
+                String text = publishedText("high".equals(request.payload()) ? "high" : "plain");
+                List<Outcome> results = new ArrayList<>();
+                if (request.rpc().equals("invoke")) {
+                    OperationResponse response = host.invoke(scope.context(), OperationRequest.of("orders.create", text));
+                    results.add(response.outcome().error().map(Outcome::failed)
+                            .orElseGet(() -> Outcome.of(response.outcome(), response.payloadText().orElse(""))));
+                } else {
+                    List<Envelope> envelopes = List.of(Envelope.builder("samples.a", "m0", "urn:test", "samples.created").data(text).build(),
+                            Envelope.builder("samples.b", "m1", "urn:test", "samples.created").data(publishedText("plain")).build());
+                    host.publish(scope.context(), envelopes).forEach(result -> results.add(Outcome.of(result, "")));
+                }
                 return Result.ok(new Published(results));
             }
         });
@@ -659,6 +705,67 @@ class HostCallbackTest {
                     call(plugin, "samples.publish-text", new PublishText(two, List.of("high", "plain"), "expired", null), null, Published.class).results());
             assertEquals(calls, sessions.size(), "nothing reaches the host and the client does not dial again");
         }
+    }
+
+    private static List<Outcome> carry(RunningPlugin plugin, Carried request, String tenant) throws IOException {
+        return call(plugin, "samples.carry", request, tenant, Published.class).results();
+    }
+
+    @Test
+    void aBaggageValueWithALoneSurrogateSendsNoCallback() throws Exception {
+        // invocation.md §5（ADR-0347）：写进回调 metadata.baggage 的值有孤立的代理项即不发请求（只有幂等键可能带这样的值），结果是
+        // PLUGINS_UNEXPECTED_001 + plugins.process.failed，phase 与回调的其他失败相同，reason 只点名键、不带值；
+        // protobuf-java 的缺省会把它换成 ? 照发，宿主收到的是另一个幂等键
+        String reason = "baggage 'xihan.idempotency-key' has a lone surrogate and cannot be encoded as UTF-8";
+        Outcome invoke = new Outcome(false, PluginErrors.UNEXPECTED, PluginMessages.FAILED,
+                "{\"id\":\"xihan.tests.sample\",\"phase\":\"orders.create\",\"reason\":\"" + reason + "\"}", "");
+        Outcome publish = new Outcome(false, PluginErrors.UNEXPECTED, PluginMessages.FAILED,
+                "{\"id\":\"xihan.tests.sample\",\"phase\":\"publish\",\"reason\":\"" + reason + "\"}", "");
+        Outcome ok = new Outcome(true, "", "", "", "");
+        try (RunningPlugin plugin = start(hostAddress())) {
+            for (String key : List.of("high", "low", "reversed", "trailing")) {
+                assertEquals(List.of(invoke), carry(plugin, new Carried("invoke", key, null, null, null), null), key);
+                assertEquals(List.of(publish, publish), carry(plugin, new Carried("publish", key, null, null, null), null), key);
+            }
+            assertEquals(List.of(), sessions, "no request reaches the host");
+
+            // 成对的代理项是一个字符：照常发出，宿主收到的就是这个幂等键
+            assertEquals(List.of(new Outcome(true, "", "", "", "{\"echo\":\"orders.create\"}")),
+                    carry(plugin, new Carried("invoke", "pair", null, null, null), null));
+            assertEquals(List.of(ok, ok), carry(plugin, new Carried("publish", "pair", null, null, null), null));
+            assertEquals(List.of(idempotencyKey("pair"), idempotencyKey("pair")),
+                    metadata.stream().map(sent -> sent.getBaggageOrThrow(BaggageKeys.IDEMPOTENCY_KEY)).toList());
+
+            // 先后：租户、截止时间与取消先失败的仍报它们
+            assertEquals(List.of(PluginMessages.CALLBACK_TENANT_DENIED),
+                    carry(plugin, new Carried("invoke", "high", null, null, "t2"), "t1").stream().map(Outcome::key).toList());
+            Outcome expired = new Outcome(false, "KERNEL_TIMEOUT_001", "kernel.invocation.deadline_exceeded", "", "");
+            assertEquals(List.of(expired), carry(plugin, new Carried("invoke", "high", null, "expired", null), null));
+            Outcome cancelled = new Outcome(false, "KERNEL_CANCELLED_001", "kernel.invocation.cancelled", "", "");
+            assertEquals(List.of(cancelled, cancelled), carry(plugin, new Carried("publish", "low", null, "cancelled", null), null));
+            // 元数据是整个请求共用的，先于载荷与逐项 data 的编码：两样都写不出时报元数据
+            assertEquals(List.of(invoke), carry(plugin, new Carried("invoke", "high", "high", null, null), null));
+            assertEquals(List.of(publish, publish), carry(plugin, new Carried("publish", "high", "high", null, null), null));
+
+            // 已关闭的客户端：元数据的核对在发出这一步之前
+            plugin.runtime.host.close();
+            assertEquals(List.of(invoke), carry(plugin, new Carried("invoke", "reversed", null, null, null), null));
+            assertEquals(List.of(publish, publish), carry(plugin, new Carried("publish", "reversed", null, null, null), null));
+            assertEquals(2, sessions.size(), "only the callbacks with the paired key reach the host");
+        }
+        // 端点与权限同样在前
+        Path missing = Files.createDirectories(directory.resolve("missing"));
+        try (RunningPlugin plugin = start(missing, RunningPlugin.MANIFEST, Map.of())) {
+            assertEquals(List.of(PluginMessages.HOST_UNAVAILABLE),
+                    carry(plugin, new Carried("invoke", "high", null, null, null), null).stream().map(Outcome::key).toList());
+        }
+        Path undeclared = Files.createDirectories(directory.resolve("undeclared"));
+        try (RunningPlugin plugin = start(undeclared, RunningPlugin.MANIFEST.replace(", \"capability:messaging.queue\"", ""),
+                Map.of(PluginRuntime.ENV_HOST_ADDRESS, hostAddress()))) {
+            assertEquals(List.of(PluginMessages.CALLBACK_DENIED, PluginMessages.CALLBACK_DENIED),
+                    carry(plugin, new Carried("publish", "high", null, null, null), null).stream().map(Outcome::key).toList());
+        }
+        assertEquals(2, sessions.size());
     }
 
     @Test

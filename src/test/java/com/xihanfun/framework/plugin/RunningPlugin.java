@@ -60,7 +60,7 @@ final class RunningPlugin implements AutoCloseable {
               "contributes": {
                 "operations": [
                   "samples.echo", "samples.fail", "samples.relay", "samples.publish", "samples.context", "samples.wait", "samples.text",
-                  "samples.publish-text"
+                  "samples.publish-text", "samples.carry"
                 ],
                 "config": { "section": "XiHan:Sample" },
                 "health": [ "sample" ]
